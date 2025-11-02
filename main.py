@@ -3,7 +3,8 @@ import requests
 from mss import mss
 from io import BytesIO
 from PIL import Image
-from gtts import gTTS
+from gtts import gTTs
+from playsound import playsound
 import pygame
 import os
 
@@ -45,25 +46,21 @@ def send_screenshot(img):
         return f"Request failed: {str(e)}"
 
 def text_to_audio(text):
-    """Convert text to speech using gTTS and play with pygame."""
+    """Convert text to speech using gTTS and play with playsound."""
     if not text.strip():
         return
-    
+
     # Save TTS as MP3
-    tts = gTTS(text=text, lang='hi')  # Hindi language, change if needed
+    tts = gTTS(text=text, lang='hi')  # Hindi, change if needed
     audio_file = os.path.join(AUDIO_FOLDER, "response.mp3")
     tts.save(audio_file)
-    
-    # Play audio
-    pygame.mixer.music.load(audio_file)
-    pygame.mixer.music.play()
-    
-    # Wait for playback to finish
-    while pygame.mixer.music.get_busy():
-        time.sleep(0.1)
-    
+
+    # Play audio (simple, no init needed)
+    playsound(audio_file)
+
     # Cleanup
     os.remove(audio_file)
+
 
 def main():
     print("Starting Free Fire Screen Capture App...")
