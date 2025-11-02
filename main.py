@@ -1,7 +1,5 @@
 from flask import Flask, request, jsonify
 import os
-from io import BytesIO
-from PIL import Image
 import requests  # If forwarding needed
 
 app = Flask(__name__)
@@ -9,12 +7,14 @@ app = Flask(__name__)
 # Configuration
 ORIGINAL_URL = "https://practice-8waa.onrender.com"  # If forward screenshots here
 
-# Commented: Local Capture/Audio (uncomment if local run needed)
+# Commented: Local Capture/Audio (uncomment if local run needed later)
 """
 import time
 from mss import mss
 from gtts import gTTS
 from playsound3 import playsound
+from PIL import Image
+from io import BytesIO
 
 SCREENSHOT_INTERVAL = 3
 AUDIO_FOLDER = "temp_audio"
@@ -27,13 +27,13 @@ def capture_screenshot():
         img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
         return img
 
-def send_screenshot(img):
+def send_screenshot(img, url):
     img_buffer = BytesIO()
     img.save(img_buffer, format='PNG')
     img_buffer.seek(0)
     files = {'screenshot': ('screenshot.png', img_buffer, 'image/png')}
     try:
-        response = requests.post(app.config['URL'], files=files)  # Use Render URL
+        response = requests.post(url, files=files)
         return response.text if response.status_code == 200 else f"Error: {response.status_code}"
     except Exception as e:
         return f"Request failed: {str(e)}"
@@ -48,12 +48,12 @@ def text_to_audio(text):
     os.remove(audio_file)
 
 def local_main():
-    app.config['URL'] = "http://localhost:5000/upload_screenshot"  # Local test
+    app.config['URL'] = "http://localhost:5000/upload_screenshot"
     print("Starting Local Mode...")
     try:
         while True:
             img = capture_screenshot()
-            message = send_screenshot(img)
+            message = send_screenshot(img, app.config['URL'])
             print(f"Message: {message}")
             text_to_audio(message)
             time.sleep(SCREENSHOT_INTERVAL)
@@ -61,7 +61,7 @@ def local_main():
         print("Stopped.")
 
 if __name__ == "__main__":
-    local_main()  # Uncomment this line to run local mode
+    local_main()  # Uncomment to run local mode
 """
 
 @app.route('/start_capture', methods=['POST'])
@@ -80,30 +80,26 @@ def upload_screenshot():
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
     
-    # Optional: Save or process image (e.g., analyze for Free Fire)
-    try:
-        img = Image.open(file.stream)
-        # Dummy analysis - replace with real logic (e.g., OpenCV for enemy detection)
-        response_msg = "Screenshot received! Analysis: Enemy spotted at 3 o'clock. Reload and fire!"
-        
-        # Optional: Forward to original URL
-        # img_buffer = BytesIO()
-        # img.save(img_buffer, format='PNG')
-        # img_buffer.seek(0)
-        # files = {'screenshot': ('screenshot.png', img_buffer, 'image/png')}
-        # fwd_response = requests.post(ORIGINAL_URL, files=files)
-        # if fwd_response.status_code == 200:
-        #     response_msg = fwd_response.text
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # Dummy analysis - no image processing needed (Pillow removed to avoid build error)
+    response_msg = "Screenshot received! Analysis: Enemy spotted at 3 o'clock. Reload and fire!"
     
-    return response_msg  # Plain text response for TTS
+    # Optional: Forward to original URL (uncomment if needed)
+    # try:
+    #     file.stream.seek(0)
+    #     files = {'screenshot': (file.filename, file.stream, file.content_type)}
+    #     fwd_response = requests.post(ORIGINAL_URL, files=files)
+    #     if fwd_response.status_code == 200:
+    #         response_msg = fwd_response.text
+    # except Exception as e:
+    #     response_msg += f" (Forward error: {str(e)})"
+    
+    return response_msg  # Plain text for TTS
 
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"message": "Free Fire Server Running! POST to /upload_screenshot."})
+    return jsonify({"message": "Free Fire Server Running! POST to /upload_screenshot for analysis."})
 
 if __name__ == '__main__':
     # Production: Use gunicorn externally
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
