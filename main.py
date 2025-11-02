@@ -23,11 +23,13 @@ def home():
             button:disabled { background: #666; cursor: not-allowed; }
             #status { margin-top: 20px; font-size: 16px; }
             #log { margin-top: 20px; text-align: left; max-height: 200px; overflow-y: scroll; background: #333; padding: 10px; border-radius: 5px; }
+            .info { background: #444; padding: 10px; border-radius: 5px; margin: 10px; }
         </style>
     </head>
     <body>
         <h1>Free Fire Real-Time Screen Capture</h1>
         <p>Click below to start sharing your screen (Free Fire game window).</p>
+        <div id="browserCheck" class="info" style="display: none;"></div>
         <button id="startBtn">Send SS</button>
         <div id="status">Status: Ready</div>
         <div id="log"></div>
@@ -36,10 +38,12 @@ def home():
             const startBtn = document.getElementById('startBtn');
             const status = document.getElementById('status');
             const logDiv = document.getElementById('log');
+            const browserCheck = document.getElementById('browserCheck');
             let stream = null;
             let video = null;
             let canvas = null;
             let ctx = null;
+            let intervalId = null;
             const INTERVAL = 3000;  // 3 seconds
             const WIDTH = 854;      // 480p width
             const HEIGHT = 480;     // 480p height
@@ -56,7 +60,33 @@ def home():
                 status.textContent = `Status: ${msg}`;
             }
 
+            // Browser support check
+            function checkSupport() {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+                    const errMsg = 'Your browser does not support screen sharing. Use Chrome/Edge on PC/Android (version 72+). On iOS, use Safari 12.1+ but full screen share limited.';
+                    updateStatus('Unsupported Browser');
+                    browserCheck.textContent = errMsg;
+                    browserCheck.style.display = 'block';
+                    startBtn.disabled = true;
+                    log('Error: getDisplayMedia not supported.');
+                    return false;
+                }
+                // Additional check for HTTPS (required)
+                if (location.protocol !== 'https:') {
+                    const errMsg = 'Screen sharing requires HTTPS. Refresh if on HTTP.';
+                    updateStatus('HTTPS Required');
+                    browserCheck.textContent = errMsg;
+                    browserCheck.style.display = 'block';
+                    startBtn.disabled = true;
+                    log('Error: Not HTTPS.');
+                    return false;
+                }
+                return true;
+            }
+
             async function startCapture() {
+                if (!checkSupport()) return;
+
                 try {
                     // Get screen share permission
                     stream = await navigator.mediaDevices.getDisplayMedia({ 
@@ -79,21 +109,26 @@ def home():
                     updateStatus('Capturing & Sending... (Stop sharing screen to end)');
                     startBtn.disabled = true;
                     startBtn.textContent = 'Capturing...';
+                    browserCheck.style.display = 'none';
 
                     // Wait for video ready, then start interval
                     video.onloadedmetadata = () => {
-                        setInterval(captureAndSend, INTERVAL);
+                        captureAndSend();  // Initial capture
+                        intervalId = setInterval(captureAndSend, INTERVAL);
                         log('Started real-time capture every 3 seconds.');
                     };
 
                 } catch (err) {
                     log(`Permission denied or error: ${err.message}`);
                     updateStatus('Error: Permission denied');
+                    if (err.name === 'NotAllowedError') {
+                        log('User denied permission. Retry by clicking button.');
+                    }
                 }
             }
 
             async function captureAndSend() {
-                if (!video || video.ended) return;
+                if (!video || video.ended || !ctx) return;
 
                 // Draw video frame to canvas (compress to 480p)
                 ctx.drawImage(video, 0, 0, WIDTH, HEIGHT);
@@ -113,13 +148,13 @@ def home():
                         const msg = await response.text();
                         log(`Sent! Server response: ${msg}`);
                         // Optional: TTS playback (browser native)
-                        if ('speechSynthesis' in window) {
+                        if ('speechSynthesis' in window && speechSynthesis.speaking === false) {
                             const utterance = new SpeechSynthesisUtterance(msg);
                             utterance.lang = 'hi-IN';  // Hindi
                             speechSynthesis.speak(utterance);
                         }
                     } else {
-                        log(`Send failed: ${response.status}`);
+                        log(`Send failed: ${response.status} - ${response.statusText}`);
                     }
                 } catch (err) {
                     log(`Network error: ${err.message}`);
@@ -138,25 +173,39 @@ def home():
                 return new Blob([ab], { type: mimeString });
             }
 
-            // Stop on stream end
-            if (stream) {
-                stream.getTracks().forEach(track => track.onended = () => {
-                    stopCapture();
-                });
-            }
-
+            // Stop capture
             function stopCapture() {
+                if (intervalId) {
+                    clearInterval(intervalId);
+                    intervalId = null;
+                }
                 if (stream) {
                     stream.getTracks().forEach(track => track.stop());
+                    stream = null;
+                }
+                if (video) {
+                    video.pause();
+                    video.srcObject = null;
+                    video = null;
                 }
                 updateStatus('Stopped');
                 startBtn.disabled = false;
                 startBtn.textContent = 'Send SS';
                 log('Capture stopped.');
-                clearInterval();  // Clear any interval
             }
 
+            // Event listeners
             startBtn.addEventListener('click', startCapture);
+
+            // Auto-stop on stream end
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden && stream) {
+                    stopCapture();
+                }
+            });
+
+            // Global stop on page unload
+            window.addEventListener('beforeunload', stopCapture);
         </script>
     </body>
     </html>
@@ -181,16 +230,6 @@ def upload_screenshot():
     
     # Dummy analysis for Free Fire
     response_msg = "Screenshot received! Analysis: Enemy spotted at 3 o'clock. Reload and fire! Health low - heal up."
-    
-    # Optional: Forward to original URL
-    # try:
-    #     file.stream.seek(0)
-    #     files = {'screenshot': (file.filename, file.stream, file.content_type)}
-    #     fwd_response = requests.post(ORIGINAL_URL, files=files)
-    #     if fwd_response.status_code == 200:
-    #         response_msg = fwd_response.text
-    # except Exception as e:
-    #     response_msg += f" (Forward error: {str(e)})"
     
     return response_msg  # Plain text for TTS
 
