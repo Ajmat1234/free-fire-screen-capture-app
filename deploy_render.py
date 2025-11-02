@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import main  # Import your main logic (but run in thread for async)
+# import main  # Commented - no need to import for server
 
 app = Flask(__name__)
 
