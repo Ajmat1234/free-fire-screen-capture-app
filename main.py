@@ -3,21 +3,17 @@ import requests
 from mss import mss
 from io import BytesIO
 from PIL import Image
-from gtts import gTTs
-from playsound import playsound
-import pygame
+from gtts import gTTS
+from playsound import playsound  # Lightweight audio player
 import os
 
 # Configuration
-URL = "https://practice-8waa.onrender.com/ss"  # Your endpoint
+URL = "https://practice-8waa.onrender.com"  # Change to your Render URL after deploy
 SCREENSHOT_INTERVAL = 3  # Seconds
 AUDIO_FOLDER = "temp_audio"  # Folder for temp audio files
 
 # Create audio folder if not exists
 os.makedirs(AUDIO_FOLDER, exist_ok=True)
-
-# Initialize pygame for audio
-pygame.mixer.init()
 
 def capture_screenshot():
     """Capture full screen screenshot using mss (fast)."""
@@ -49,18 +45,17 @@ def text_to_audio(text):
     """Convert text to speech using gTTS and play with playsound."""
     if not text.strip():
         return
-
+    
     # Save TTS as MP3
-    tts = gTTS(text=text, lang='hi')  # Hindi, change if needed
+    tts = gTTS(text=text, lang='hi')  # Hindi language, change if needed
     audio_file = os.path.join(AUDIO_FOLDER, "response.mp3")
     tts.save(audio_file)
-
-    # Play audio (simple, no init needed)
+    
+    # Play audio (blocks until finish)
     playsound(audio_file)
-
+    
     # Cleanup
     os.remove(audio_file)
-
 
 def main():
     print("Starting Free Fire Screen Capture App...")
@@ -87,8 +82,6 @@ def main():
             
     except KeyboardInterrupt:
         print("\nStopped by user.")
-    finally:
-        pygame.mixer.quit()
 
 if __name__ == "__main__":
     main()
