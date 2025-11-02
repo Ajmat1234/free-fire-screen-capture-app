@@ -1,5 +1,5 @@
 mss==9.0.1          # For fast screenshots
 requests==2.31.0    # For sending HTTP POST
 gtts==2.5.1         # Google Text-to-Speech
-pygame==2.6.0       # For playing audio
+playsound==1.3.0    # For playing audio (replaces pygame)
 Pillow==10.1.0      # For image handling (if needed)
