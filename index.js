@@ -1,6 +1,7 @@
 const express = require('express');
 const morgan = require('morgan');
 const path = require('path');
+const fs = require("fs");
 const bodyParser = require('body-parser');
 const Worker = require('./worker');
 
@@ -9,75 +10,45 @@ app.use(morgan('tiny'));
 app.use(bodyParser.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// single worker instance
 let worker = null;
+
+app.get("/frames-list", (_req, res) => {
+  const framesDir = path.join(__dirname, "public", "frames");
+  const files = fs.readdirSync(framesDir).filter(f => f.endsWith(".jpg")).slice(-20);
+  res.json(files);
+});
 
 app.post('/start', async (req, res) => {
   try {
     if (worker) return res.status(400).json({ error: 'Already running' });
 
-    const {
-      host,
-      streamId,
-      password,
-      intervalSec,
-      uploadUrl,
-      fullUrl
-    } = req.body || {};
+    const { host, streamId, password, intervalSec, uploadUrl, fullUrl } = req.body || {};
+    let pageUrl = fullUrl?.trim() || `${host}/${streamId}${password ? `?password=${password}` : ''}`;
 
-    // Build target URL
-    let pageUrl = '';
-    if (fullUrl && fullUrl.trim()) {
-      pageUrl = fullUrl.trim();
-    } else {
-      if (!host || !streamId) {
-        return res.status(400).json({ error: 'host and streamId required (or provide fullUrl)' });
-      }
-      pageUrl = host.replace(/\/$/, '') + '/' + encodeURIComponent(String(streamId).trim());
-      if (password && String(password).trim()) {
-        const qs = '?password=' + encodeURIComponent(String(password).trim());
-        pageUrl += qs;
-      }
-    }
-
-    const cfg = {
+    worker = new Worker({
       pageUrl,
       intervalSec: Number(intervalSec) || 3,
-      uploadUrl: uploadUrl || process.env.UPLOAD_URL || '',
-    };
-    if (!cfg.uploadUrl) return res.status(400).json({ error: 'uploadUrl required' });
+      uploadUrl: uploadUrl || process.env.UPLOAD_URL
+    });
 
-    worker = new Worker(cfg);
     await worker.start();
-    return res.json({ ok: true, pageUrl, intervalSec: cfg.intervalSec });
+    return res.json({ ok: true, pageUrl });
   } catch (e) {
-    return res.status(500).json({ error: e.message || String(e) });
+    return res.status(500).json({ error: e.message });
   }
 });
 
 app.post('/stop', async (_req, res) => {
-  try {
-    if (worker) {
-      await worker.stop();
-      worker = null;
-    }
-    return res.json({ ok: true, stopped: true });
-  } catch (e) {
-    return res.status(500).json({ error: e.message || String(e) });
-  }
+  if (worker) await worker.stop();
+  worker = null;
+  res.json({ ok: true });
 });
 
 app.get('/status', (_req, res) => {
   if (!worker) return res.json({ running: false });
-  return res.json({
-    running: worker.running,
-    pageUrl: worker.pageUrl,
-    intervalSec: worker.intervalSec,
-    uploadUrl: worker.uploadUrl
-  });
+  res.json({ running: worker.running, pageUrl: worker.pageUrl });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log('Listening on', PORT);
-});
+app.listen(process.env.PORT || 3000, () =>
+  console.log("Server started")
+);
