@@ -1,20 +1,24 @@
-FROM node:20-bullseye
+FROM debian:bullseye
 
-# deps for chromium in puppeteer
+# Install Node + Chromium + dependencies
 RUN apt-get update && apt-get install -y \
-  ca-certificates fonts-liberation libnss3 libxss1 libasound2 libatk1.0-0 \
-  libatk-bridge2.0-0 libgtk-3-0 libdrm2 libgbm1 libxcb1 libxcomposite1 \
-  libxrandr2 libxi6 libxcursor1 libxdamage1 libxfixes3 libxkbcommon0 \
+  curl gnupg ca-certificates git \
+  chromium libnss3 libxss1 libasound2 libatk1.0-0 libatk-bridge2.0-0 \
+  libcups2 libdrm2 libgbm1 libgtk-3-0 libxcomposite1 libxrandr2 \
+  libxi6 libxcursor1 libxdamage1 libxfixes3 libxkbcommon0 \
+  && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+  && apt-get install -y nodejs \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY package.json package-lock.json* /app/
-RUN npm install --production
 
-COPY . /app
+COPY package*.json ./
+RUN npm install --omit=dev
 
-ENV NODE_ENV=production
+COPY . .
+
 ENV PORT=3000
-EXPOSE 3000
+ENV CHROME_PATH="/usr/bin/chromium"
 
+EXPOSE 3000
 CMD ["node", "index.js"]
