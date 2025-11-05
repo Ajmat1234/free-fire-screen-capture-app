@@ -1,18 +1,45 @@
 const puppeteer = require("puppeteer-core");
-const puppeteerExtra = require("puppeteer-extra");
-const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const axios = require("axios");
 const FormData = require("form-data");
 const fs = require("fs");
 const path = require("path");
-
-puppeteerExtra.use(StealthPlugin());
+const PNG = require("pngjs").PNG;
+const pixelmatch = require("pixelmatch");
 
 const chromiumPath = process.env.CHROME_PATH || "/usr/bin/chromium";
-
-// frames folder
 const framesDir = path.join(__dirname, "public", "frames");
 if (!fs.existsSync(framesDir)) fs.mkdirSync(framesDir, { recursive: true });
+
+const templateVerify = PNG.sync.read(fs.readFileSync("./vision/verify.png"));
+const templateJoin = PNG.sync.read(fs.readFileSync("./vision/join.png"));
+
+async function findTemplate(big, small, tolerance = 0.15) {
+  const W = big.width, H = big.height;
+  const w = small.width, h = small.height;
+
+  for (let y = 0; y < H - h; y += 4) {
+    for (let x = 0; x < W - w; x += 4) {
+      let diff = 0;
+      for (let j = 0; j < h; j++) {
+        for (let i = 0; i < w; i++) {
+          const bi = ((y + j) * W + (x + i)) * 4;
+          const si = (j * w + i) * 4;
+
+          const dr = big.data[bi] - small.data[si];
+          const dg = big.data[bi + 1] - small.data[si + 1];
+          const db = big.data[bi + 2] - small.data[si + 2];
+
+          diff += dr * dr + dg * dg + db * db;
+        }
+      }
+
+      if (diff / (w * h) < tolerance * 30000) {
+        return { x, y, w, h };
+      }
+    }
+  }
+  return null;
+}
 
 class Worker {
   constructor({ pageUrl, intervalSec, uploadUrl }) {
@@ -21,121 +48,99 @@ class Worker {
     this.uploadUrl = uploadUrl;
   }
 
-  log(...a) {
-    console.log("[Worker]", new Date().toISOString(), "-", ...a);
-  }
+  log(...a) { console.log("[Worker]", ...a); }
 
   async start() {
-    this.log("Launching browser human emu...");
-
-    this.browser = await puppeteerExtra.launch({
-      headless: "new",
+    this.browser = await puppeteer.launch({
+      headless: true,
       executablePath: chromiumPath,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--window-size=1080,1920",
-      ],
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
     this.page = await this.browser.newPage();
-    await this.page.setViewport({ width: 1080, height: 1920, isMobile: true, hasTouch: true });
-    await this.page.setUserAgent("Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 Chrome/121 Mobile");
+    await this.page.setViewport({ width: 1080, height: 1920, isMobile: true });
 
-    await this.page.goto(this.pageUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-    this.log("Page opened... human mode");
+    await this.page.goto(this.pageUrl, { waitUntil: "networkidle2" });
 
-    await this.solveByVision();
+    this.log("Page opened");
 
-    this.log("Stream solved, starting screenshots");
-    this.timer = setInterval(() => this.capture(), this.intervalSec * 1000);
+    await this.solveCloudflare();
+    await this.solveJoinButton();
+
+    this.log("✅ Human solved. Starting stream.");
+
+    await this.captureOnce();
+    setInterval(() => this.captureOnce(), this.intervalSec * 1000);
   }
 
-  async solveByVision() {
-    this.log("Starting visual solving loop...");
+  async screenshotPNG() {
+    const buf = await this.page.screenshot({ type: "png" });
+    return PNG.sync.read(buf);
+  }
 
-    let tries = 0;
-    while (tries < 40) {
-      const buf = await this.page.screenshot();
+  async clickCenter({ x, y, w, h }) {
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    await this.page.mouse.click(cx, cy, { delay: 120 });
+    await this.page.waitForTimeout(1500);
+  }
 
-      const fname = `debug-${Date.now()}.jpg`;
-      fs.writeFileSync(path.join(framesDir, fname), buf);
+  async solveCloudflare() {
+    this.log("🔍 Looking for verification box");
 
-      // detect VERIFY box by coordinate heuristic
-      // (approx center bottom zone)
-      if (await this.lookForVerify(buf)) {
-        this.log("Verify box detected, clicking pixel zone...");
-        await this.tapZone(540 - 200, 960 + 250); // x,y offset
+    while (true) {
+      const img = await this.screenshotPNG();
+      const match = await findTemplate(img, templateVerify);
+
+      if (match) {
+        this.log("✅ Verify box found, clicking...");
+        await this.clickCenter(match);
+        await this.page.waitForTimeout(4000);
+      }
+
+      const media = await this.page.$("video,canvas");
+      if (media) {
+        this.log("🎯 Cloudflare solved.");
+        break;
+      }
+
+      await this.page.waitForTimeout(1500);
+    }
+  }
+
+  async solveJoinButton() {
+    this.log("🔍 Waiting for Join Stream button...");
+
+    while (true) {
+      const img = await this.screenshotPNG();
+      const match = await findTemplate(img, templateJoin, 0.2);
+
+      if (match) {
+        this.log("✅ Join button found, clicking...");
+        await this.clickCenter(match);
         await this.page.waitForTimeout(3000);
       }
 
-      // detect JOIN STREAM button by region color
-      if (await this.lookForJoin(buf)) {
-        this.log("Join Stream detected, clicking...");
-        await this.tapZone(540, 960 + 100);
-        await this.page.waitForTimeout(5000);
-      }
-
-      // check if video now present
-      const media = await this.page.$("video, canvas");
+      const media = await this.page.$("video,canvas");
       if (media) {
-        this.log("✅ video detected!");
-        return;
+        this.log("🎬 Joined stream.");
+        break;
       }
 
-      tries++;
-      await this.page.waitForTimeout(1500);
-    }
-
-    this.log("⚠️ Vision timeout, continuing anyway");
-  }
-
-  async lookForVerify(buf) {
-    // super lightweight scan — check if dark-square + text zone
-    // check some key pixel spots for grey border
-    const pixel = buf[1000] || 0;
-    return pixel > 10; // tiny trick: presence check, lightweight
-  }
-
-  async lookForJoin(buf) {
-    // detect the Blue button by a consistent pattern region
-    const pixel = buf[2000] || 0;
-    return pixel > 50;
-  }
-
-  async tapZone(x, y) {
-    try {
-      if (this.page.touchscreen) {
-        await this.page.touchscreen.tap(x, y);
-      } else {
-        await this.page.mouse.click(x, y);
-      }
-      this.log("Tapped", x, y);
-    } catch (e) {
-      this.log("tap error", e);
+      await this.page.waitForTimeout(1000);
     }
   }
 
-  async capture() {
-    const el = await this.page.$("video") || await this.page.$("canvas");
-    if (!el) return;
-
+  async captureOnce() {
     const buf = await this.page.screenshot({ type: "jpeg", quality: 70 });
-
-    const fname = `frame-${Date.now()}.jpg`;
-    fs.writeFileSync(path.join(framesDir, fname), buf);
-    this.log("Saved", fname);
+    const filename = `frame-${Date.now()}.jpg`;
+    fs.writeFileSync(path.join(framesDir, filename), buf);
+    this.log("Saved", filename);
 
     const form = new FormData();
-    form.append("file", buf, { filename: fname });
+    form.append("file", buf, { filename });
 
-    try {
-      await axios.post(this.uploadUrl, form, { headers: form.getHeaders(), timeout: 15000 });
-      this.log("Upload ok");
-    } catch {
-      this.log("Upload fail");
-    }
+    await axios.post(this.uploadUrl, form, { headers: form.getHeaders() });
   }
 }
 
