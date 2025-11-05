@@ -20,16 +20,17 @@ class Worker {
 
     // launch chromium
     this.browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--autoplay-policy=no-user-gesture-required',
-        '--disable-dev-shm-usage',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--use-gl=egl'
+  headless: "new",
+  executablePath: chromiumPath,
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--autoplay-policy=no-user-gesture-required",
+    "--disable-dev-shm-usage",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--use-gl=egl"
       ]
     });
 
