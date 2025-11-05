@@ -1,6 +1,7 @@
 const puppeteer = require('puppeteer');
 const axios = require('axios');
 const FormData = require('form-data');
+const chromiumPath = process.env.CHROME_PATH || "/usr/bin/chromium";
 
 class Worker {
   constructor({ pageUrl, intervalSec, uploadUrl }) {
