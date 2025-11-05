@@ -1,7 +1,14 @@
 const puppeteer = require('puppeteer-core');
 const axios = require('axios');
 const FormData = require('form-data');
+const fs = require("fs");
+const path = require("path");
+
 const chromiumPath = process.env.CHROME_PATH || "/usr/bin/chromium";
+
+// Create frames folder
+const framesDir = path.join(__dirname, "public", "frames");
+if (!fs.existsSync(framesDir)) fs.mkdirSync(framesDir, { recursive: true });
 
 class Worker {
   constructor({ pageUrl, intervalSec, uploadUrl }) {
@@ -14,101 +21,112 @@ class Worker {
     this.running = false;
   }
 
+  log(...args) {
+    console.log("[Worker]", new Date().toISOString(), "-", ...args);
+  }
+
   async start() {
     if (this.running) return;
     this.running = true;
+    this.log("Starting worker...", this.pageUrl);
 
-    // launch chromium
     this.browser = await puppeteer.launch({
-  headless: "new",
-  executablePath: chromiumPath,
-  args: [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--autoplay-policy=no-user-gesture-required",
-    "--disable-dev-shm-usage",
-    "--disable-background-timer-throttling",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding",
-    "--use-gl=egl"
+      headless: "new",
+      executablePath: chromiumPath,
+      args: [
+        "--no-sandbox", "--disable-setuid-sandbox",
+        "--autoplay-policy=no-user-gesture-required",
+        "--disable-dev-shm-usage", "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
+        "--use-gl=egl"
       ]
     });
 
     this.page = await this.browser.newPage();
     await this.page.setViewport({ width: 1080, height: 1920 });
 
-    // go to target page
-    await this.page.goto(this.pageUrl, { waitUntil: 'networkidle2', timeout: 60000 }).catch(()=>{});
+    this.log("Opening page...");
+    await this.page.goto(this.pageUrl, { waitUntil: 'networkidle2', timeout: 60000 }).catch(e => {
+      this.log("Navigation failed:", e.message);
+    });
 
-    // try to ensure video present
     await this.waitForMedia();
-
-    // first capture immediately
     await this.captureOnce().catch(()=>{});
 
-    // periodic captures
     this.timer = setInterval(() => this.captureOnce().catch(()=>{}), this.intervalSec * 1000);
   }
 
   async waitForMedia() {
-    // Wait for either <video> or <canvas>
+    this.log("Waiting for video/canvas...");
     try {
-      await this.page.waitForSelector('video,canvas', { timeout: 30000 });
-    } catch (_) {}
-    // try to play if paused
+      await this.page.waitForSelector("video,canvas", { timeout: 30000 });
+      this.log("Video element detected!");
+    } catch {
+      this.log("No video element found!");
+    }
+
     try {
       await this.page.evaluate(() => {
         const v = document.querySelector('video');
         if (v && v.paused) v.play().catch(()=>{});
       });
-    } catch (_) {}
+      this.log("Tried auto-play on video");
+    } catch {}
   }
 
   async captureOnce() {
     if (!this.page) return;
+
+    this.log("Capturing screenshot...");
     const handle = await this.page.$('video') || await this.page.$('canvas') || await this.page.$('body');
-    if (!handle) return;
 
-    // tiny wait so the frame refreshes
+    if (!handle) {
+      this.log("No element to capture!");
+      return;
+    }
+
     await this.page.waitForTimeout(100);
-
     const box = await handle.boundingBox();
-    let opts = { type: 'jpeg', quality: 70 };
+
+    let opts = { type: "jpeg", quality: 70 };
     if (box) {
-      opts.clip = {
-        x: Math.max(0, Math.floor(box.x)),
-        y: Math.max(0, Math.floor(box.y)),
-        width: Math.floor(Math.max(1, box.width)),
-        height: Math.floor(Math.max(1, box.height))
-      };
+      opts.clip = { x: box.x, y: box.y, width: box.width, height: box.height };
     }
 
     const buf = await this.page.screenshot(opts);
-    const form = new FormData();
-    form.append('file', buf, { filename: `frame-${Date.now()}.jpg`, contentType: 'image/jpeg' });
 
-    await axios.post(this.uploadUrl, form, {
-      headers: form.getHeaders(),
-      timeout: 20000
-    }).then(r => {
-      console.log(new Date().toISOString(), 'Uploaded', r.status);
-    }).catch(e => {
-      console.error(new Date().toISOString(), 'Upload failed:', e.message);
-    });
+    // Save locally for preview
+    const filename = `frame-${Date.now()}.jpg`;
+    const filePath = path.join(framesDir, filename);
+    fs.writeFileSync(filePath, buf);
+    this.log("Saved frame locally:", filename);
+
+    // Upload to remote server
+    const form = new FormData();
+    form.append("file", buf, { filename, contentType: "image/jpeg" });
+
+    try {
+      const r = await axios.post(this.uploadUrl, form, {
+        headers: form.getHeaders(),
+        timeout: 20000
+      });
+      this.log("Upload success:", r.status);
+    } catch (e) {
+      this.log("Upload failed:", e.message);
+    }
   }
 
   async stop() {
+    this.log("Stopping worker...");
     this.running = false;
     if (this.timer) clearInterval(this.timer);
-    this.timer = null;
-    if (this.page) {
-      try { await this.page.close(); } catch(_) {}
-    }
-    if (this.browser) {
-      try { await this.browser.close(); } catch(_) {}
-    }
+
+    if (this.page) try { await this.page.close(); } catch {}
+    if (this.browser) try { await this.browser.close(); } catch {}
+
     this.page = null;
     this.browser = null;
+    this.log("Worker stopped");
   }
 }
 
