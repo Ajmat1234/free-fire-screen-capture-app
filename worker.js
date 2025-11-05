@@ -56,39 +56,105 @@ class Worker {
     this.timer = setInterval(() => this.captureOnce().catch(()=>{}), this.intervalSec * 1000);
   }
 
+  /**
+   * waitForMedia:
+   * - Waits for the Cloudflare "verify you are human" checkbox to become clickable.
+   * - Important: On some pages the checkbox UI appears but only becomes actionable
+   *   after several seconds (page scripts run). So we poll for an element that is
+   *   visible and not already checked/disabled, and click it when ready.
+   *
+   * - If checkbox never becomes clickable within the timeout, we proceed and try
+   *   to find a video/canvas. All attempts are logged so you can diagnose.
+   */
   async waitForMedia() {
     this.log("Waiting for video/canvas...");
 
-    // ✅ Cloudflare checkbox auto-click
-    try {
-      this.log("Looking for human verification...");
-      await this.page.waitForSelector('input[type="checkbox"]', { timeout: 15000 });
-      await this.page.evaluate(() => {
-        const cb = document.querySelector('input[type="checkbox"]');
-        if (cb) cb.click();
-      });
-      this.log("Clicked Cloudflare checkbox");
-      await this.page.waitForTimeout(4000); // wait for CF to verify
-    } catch {
-      this.log("No CF checkbox found or click failed");
+    // Polling params
+    const pollIntervalMs = 1000;
+    const maxWaitMs = 40000; // max time to wait for the checkbox to become clickable
+    const start = Date.now();
+    let clicked = false;
+
+    this.log("Looking for human verification checkbox (will poll up to " + (maxWaitMs/1000) + "s)...");
+
+    while (Date.now() - start < maxWaitMs) {
+      try {
+        // Check in page context if there's an input checkbox that is visible and clickable
+        const info = await this.page.evaluate(() => {
+          const el = document.querySelector('input[type="checkbox"]');
+          if (!el) return { found: false };
+          const rect = el.getBoundingClientRect();
+          const visible = rect.width > 0 && rect.height > 0;
+          const checked = el.checked === true;
+          const disabled = el.disabled === true;
+          return { found: true, visible, checked, disabled };
+        });
+
+        if (info && info.found) {
+          this.log("Checkbox found. visible:", info.visible, "checked:", info.checked, "disabled:", info.disabled);
+
+          // If visible and not checked and not disabled, click it
+          if (info.visible && !info.checked && !info.disabled) {
+            try {
+              await this.page.evaluate(() => {
+                const cb = document.querySelector('input[type="checkbox"]');
+                if (cb) cb.click();
+              });
+              clicked = true;
+              this.log("Clicked verification checkbox");
+              // give some time for any challenge to complete
+              await this.page.waitForTimeout(4000);
+              break;
+            } catch (e) {
+              this.log("Click attempt failed:", e.message || e);
+            }
+          } else {
+            // Checkbox exists but either already checked or not yet actionable
+            this.log("Checkbox present but not actionable yet (will retry) — checked:", info.checked, "disabled:", info.disabled);
+          }
+        } else {
+          // no checkbox element yet
+          // Optionally, sometimes the CF widget uses different markup (iframe). Try to detect common iframe-based widget.
+          // We'll also search for iframe titles or elements that hint at CF challenge.
+          const iframeFound = await this.page.$$eval('iframe', iframes => {
+            return iframes.map(f => ({title: f.title || '', src: f.src || ''})).slice(0,5);
+          }).catch(()=>[]);
+          if (iframeFound && iframeFound.length) {
+            // log briefly but don't spam
+            this.log("iframes on page (sample):", iframeFound.slice(0,3));
+          } else {
+            this.log("No checkbox or relevant iframes yet");
+          }
+        }
+      } catch (e) {
+        this.log("Poll check error:", e.message || e);
+      }
+
+      await this.page.waitForTimeout(pollIntervalMs);
     }
 
-    // ✅ Wait for video/canvas
+    if (!clicked) {
+      this.log("Checkbox click not performed within timeout (proceeding).");
+    }
+
+    // After checkbox logic, wait for video/canvas element
     try {
       await this.page.waitForSelector('video,canvas', { timeout: 30000 });
-      this.log("Video element detected!");
+      this.log("Video or canvas element detected!");
     } catch {
-      this.log("No video element detected within timeout");
+      this.log("No video/canvas element detected within timeout");
     }
 
-    // ✅ Try autoplay
+    // Try autoplay if a video exists
     try {
       await this.page.evaluate(() => {
         const v = document.querySelector('video');
         if (v && v.paused) v.play().catch(()=>{});
       });
       this.log("Attempted autoplay on video");
-    } catch (_) {}
+    } catch (e) {
+      this.log("Autoplay attempt error:", e.message || e);
+    }
   }
 
   async captureOnce() {
@@ -107,7 +173,12 @@ class Worker {
 
     let opts = { type: "jpeg", quality: 70 };
     if (box) {
-      opts.clip = { x: box.x, y: box.y, width: box.width, height: box.height };
+      // Ensure integers and minimum sizes
+      const x = Math.max(0, Math.floor(box.x));
+      const y = Math.max(0, Math.floor(box.y));
+      const width = Math.max(1, Math.floor(box.width));
+      const height = Math.max(1, Math.floor(box.height));
+      opts.clip = { x, y, width, height };
     }
 
     const buf = await this.page.screenshot(opts);
@@ -115,8 +186,12 @@ class Worker {
     // Save locally for preview
     const filename = `frame-${Date.now()}.jpg`;
     const filePath = path.join(framesDir, filename);
-    fs.writeFileSync(filePath, buf);
-    this.log("Saved frame locally:", filename);
+    try {
+      fs.writeFileSync(filePath, buf);
+      this.log("Saved frame locally:", filename);
+    } catch (e) {
+      this.log("Failed to save frame locally:", e.message || e);
+    }
 
     // Upload to remote server
     const form = new FormData();
@@ -129,7 +204,7 @@ class Worker {
       });
       this.log("Upload success:", r.status);
     } catch (e) {
-      this.log("Upload failed:", e.message);
+      this.log("Upload failed:", e.message || e);
     }
   }
 
@@ -138,8 +213,8 @@ class Worker {
     this.running = false;
     if (this.timer) clearInterval(this.timer);
 
-    if (this.page) try { await this.page.close(); } catch {}
-    if (this.browser) try { await this.browser.close(); } catch {}
+    if (this.page) try { await this.page.close(); } catch (e) { this.log("page close error:", e.message || e); }
+    if (this.browser) try { await this.browser.close(); } catch (e) { this.log("browser close error:", e.message || e); }
 
     this.page = null;
     this.browser = null;
