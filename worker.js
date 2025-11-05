@@ -58,20 +58,37 @@ class Worker {
 
   async waitForMedia() {
     this.log("Waiting for video/canvas...");
+
+    // ✅ Cloudflare checkbox auto-click
     try {
-      await this.page.waitForSelector("video,canvas", { timeout: 30000 });
-      this.log("Video element detected!");
+      this.log("Looking for human verification...");
+      await this.page.waitForSelector('input[type="checkbox"]', { timeout: 15000 });
+      await this.page.evaluate(() => {
+        const cb = document.querySelector('input[type="checkbox"]');
+        if (cb) cb.click();
+      });
+      this.log("Clicked Cloudflare checkbox");
+      await this.page.waitForTimeout(4000); // wait for CF to verify
     } catch {
-      this.log("No video element found!");
+      this.log("No CF checkbox found or click failed");
     }
 
+    // ✅ Wait for video/canvas
+    try {
+      await this.page.waitForSelector('video,canvas', { timeout: 30000 });
+      this.log("Video element detected!");
+    } catch {
+      this.log("No video element detected within timeout");
+    }
+
+    // ✅ Try autoplay
     try {
       await this.page.evaluate(() => {
         const v = document.querySelector('video');
         if (v && v.paused) v.play().catch(()=>{});
       });
-      this.log("Tried auto-play on video");
-    } catch {}
+      this.log("Attempted autoplay on video");
+    } catch (_) {}
   }
 
   async captureOnce() {
