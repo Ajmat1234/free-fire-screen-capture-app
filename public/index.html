@@ -60,6 +60,32 @@
 
     <div class="status" id="status">Status: Idle</div>
     <div class="muted">Tip: If Start fails, try filling “Full Player URL”.</div>
+
+
+    <!-- ✅ LIVE CAPTURED FRAMES SECTION ADDED HERE -->
+    <h4 style="margin-top:16px;">Live Captured Frames</h4>
+    <div id="framesBox" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+
+    <script>
+    async function loadFrames(){
+      const res = await fetch('/frames-list');
+      const files = await res.json();
+      const box = document.getElementById("framesBox");
+      box.innerHTML = "";
+      files.forEach(f=>{
+        const img = document.createElement("img");
+        img.src = "/frames/" + f;
+        img.style.width = "120px";
+        img.style.border = "1px solid #ccc";
+        img.style.borderRadius = "6px";
+        box.appendChild(img);
+      });
+    }
+    setInterval(loadFrames, 3000);
+    loadFrames();
+    </script>
+    <!-- ✅ PREVIEW END -->
+
   </div>
 
 <script>
