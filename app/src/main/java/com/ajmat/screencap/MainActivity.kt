@@ -2,6 +2,8 @@ package com.ajmat.screencap
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.Manifest
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
@@ -11,6 +13,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
@@ -29,10 +32,22 @@ class MainActivity : AppCompatActivity() {
             resultCode = result.resultCode
             resultData = result.data
             statusTv.text = "Status: Permission granted"
-            startCaptureService()
+            // Check notification permission after screen permission
+            checkAndRequestNotificationPermission()
         } else {
             Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
             statusTv.text = "Status: permission denied"
+        }
+    }
+
+    // New: Notification permission launcher
+    private val requestNotificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (isGranted) {
+            Toast.makeText(this, "Notification permission granted. Starting service...", Toast.LENGTH_SHORT).show()
+            startCaptureService()
+        } else {
+            Toast.makeText(this, "Notification permission denied. Foreground service needs it for notifications.", Toast.LENGTH_LONG).show()
+            statusTv.text = "Status: notification permission denied"
         }
     }
 
@@ -60,8 +75,8 @@ class MainActivity : AppCompatActivity() {
             }
             val uploadUrl = uploadUrlInput.text.toString().trim()
             val wsUrl = wsUrlInput.text.toString().trim()
-            if (uploadUrl.isEmpty() || wsUrl.isEmpty()) {
-                Toast.makeText(this, "Provide upload and WebSocket URLs", Toast.LENGTH_SHORT).show()
+            if (uploadUrl.isEmpty()) {  // Made wsUrl optional as per your use case
+                Toast.makeText(this, "Provide upload URL (WebSocket optional)", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
@@ -70,7 +85,7 @@ class MainActivity : AppCompatActivity() {
                 val intent = mpm.createScreenCaptureIntent()
                 requestProjection.launch(intent)
             } else {
-                startCaptureService()
+                checkAndRequestNotificationPermission()
             }
         }
 
@@ -86,6 +101,19 @@ class MainActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
         outState.putInt("resultCode", resultCode)
         outState.putParcelable("resultData", resultData)
+    }
+
+    // New: Check and request notification permission
+    private fun checkAndRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {  // Android 13+
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                startCaptureService()
+            } else {
+                requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        } else {
+            startCaptureService()
+        }
     }
 
     private fun startCaptureService() {
