@@ -6,24 +6,32 @@ workflows:
       vars:
         GRADLE_OPTS: "-Xmx1024m"
     scripts:
-      - name: Install Latest Command-Line Tools & Accept Licenses  # Key fix: Update cmdline-tools for XML v4 support
+      - name: Clean & Install Latest Command-Line Tools  # Enhanced: Uninstall old, install latest v13.0+
         script: |
           # Accept licenses first
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-          # Install latest cmdline-tools (for AAPT XML v4 & API 34 support)
+          # Uninstall old cmdline-tools if present (clean cache)
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --uninstall "cmdline-tools;legacy" "cmdline-tools;9.0.0" "cmdline-tools;10.0" "cmdline-tools;11.0" "cmdline-tools;12.0"
+          # Install latest cmdline-tools (v13.0+ for XML v4 support)
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "cmdline-tools;latest"
-          # Update PATH to use new cmdline-tools
+          # Update PATH to new cmdline-tools (symlink refresh)
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          # Re-accept licenses with updated tools
+          source ~/.zshrc || source ~/.bash_profile  # Refresh shell if needed
+          # Re-accept licenses
           yes | sdkmanager --licenses
-          echo "Latest cmdline-tools installed!"
-      - name: Install Android SDK 34 & Build Tools  # Now with updated tools
+          # Verify: Check aapt version (should be from build-tools 34 later)
+          echo "Cmdline-tools installed. PATH: $PATH"
+      - name: Clean & Install Android SDK 34 & Build Tools  # Uninstall old, reinstall clean
         script: |
-          # Install platform and build tools for API 34
+          # Uninstall old build-tools (prevent corruption)
+          sdkmanager --uninstall "build-tools;33.0.1" "build-tools;34.0.0" || true  # Ignore if not found
+          # Install platform and fresh build-tools for API 34
           sdkmanager "platforms;android-34" "build-tools;34.0.0"
           # Final license accept
           yes | sdkmanager --licenses
-          echo "SDK 34 installed successfully!"
+          # Verify AAPT from new build-tools
+          $ANDROID_HOME/build-tools/34.0.0/aapt version
+          echo "SDK 34 & Build-Tools 34.0.0 installed successfully!"
       - name: Generate Gradle wrapper
         script: |
           gradle wrapper
