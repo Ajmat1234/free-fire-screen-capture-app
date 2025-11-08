@@ -34,12 +34,13 @@ workflows:
           # Verify AAPT from new build-tools (should print version without error)
           $ANDROID_HOME/build-tools/34.0.0/aapt2 version
           echo "SDK 34 & Build-Tools 34.0.0 installed! AAPT ready for API 34 attributes."
-      - name: Generate Gradle wrapper
+      - name: Generate Gradle wrapper  # Fixed: Use 'gradle wrapper' to create gradlew first
         script: |
-          ./gradlew wrapper
+          gradle wrapper  # Global gradle to generate ./gradlew
+          echo "Gradle wrapper generated successfully!"
       - name: Build debug APK
         script: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug  # Now use ./gradlew
     artifacts:
       - app/build/outputs/apk/debug/app-debug.apk
