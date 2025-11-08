@@ -75,7 +75,7 @@ class ScreenshotCapturer(
             val metrics = DisplayMetrics()
             display.getRealMetrics(metrics)
             width = metrics.widthPixels
-            height = heightPixels
+            height = metrics.heightPixels
             density = metrics.densityDpi
 
             Log.d(TAG, "Display size: $width x $height, density: $density")
@@ -90,7 +90,7 @@ class ScreenshotCapturer(
 
             // Create virtual display - safe in try/catch with retry for Android 15
             virtualDisplay = try {
-                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                val flags = if (Build.VERSION.SDK_INT >= 35) {
                     // Android 15 specific flags: OWN_CONTENT_ONLY and PUBLIC for stricter security
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
                 } else {
@@ -108,10 +108,10 @@ class ScreenshotCapturer(
                 )
             } catch (e: IllegalStateException) {
                 Log.e(TAG, "createVirtualDisplay failed (illegal state)", e)
-                // Retry with alternative flags for Android 15
+                // Retry once with different flag
                 try {
-                    TimeUnit.MILLISECONDS.sleep(200) // Longer wait for Android 15
-                    val retryFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                    TimeUnit.MILLISECONDS.sleep(100)
+                    val retryFlags = if (Build.VERSION.SDK_INT >= 35) {
                         DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
                     } else {
                         DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
