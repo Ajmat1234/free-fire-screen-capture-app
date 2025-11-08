@@ -38,6 +38,10 @@ class ScreenshotCapturer(
     private var height = 0
     private var density = 0
 
+    // simple lock so captureOnce isn't run concurrently
+    @Volatile
+    private var capturing = false
+
     init {
         try {
             if (resultData != null && resultCode != 0) {
@@ -70,18 +74,37 @@ class ScreenshotCapturer(
             height = metrics.heightPixels
             density = metrics.densityDpi
 
-            // create image reader with safe pixel format
+            // Use RGBA_8888 pixel format (common and supported). Keep small buffer count.
             imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
 
             handlerThread = HandlerThread("ScreenCapture").apply { start() }
             handler = Handler(handlerThread!!.looper)
 
-            virtualDisplay = mediaProjection?.createVirtualDisplay(
-                "screencap",
-                width, height, density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader?.surface, null, handler
-            )
+            // Create virtual display - safe in try/catch
+            virtualDisplay = try {
+                mediaProjection?.createVirtualDisplay(
+                    "screencap",
+                    width,
+                    height,
+                    density,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader?.surface,
+                    null,
+                    handler
+                )
+            } catch (e: IllegalStateException) {
+                Log.e(TAG, "createVirtualDisplay failed (illegal state)", e)
+                null
+            } catch (e: Exception) {
+                Log.e(TAG, "createVirtualDisplay failed", e)
+                null
+            }
+
+            if (virtualDisplay == null) {
+                Log.e(TAG, "virtualDisplay is null after create")
+                // cleanup prepared resources
+                stop()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "prepare failed", e)
             // cleanup on failure
@@ -89,57 +112,110 @@ class ScreenshotCapturer(
         }
     }
 
+    /**
+     * Capture a single frame synchronously.
+     * Returns a Bitmap or null.
+     * This method is defensive and will never throw — it logs errors.
+     */
     fun captureOnce(): Bitmap? {
+        // prevent concurrent captures which can confuse ImageReader
+        if (capturing) {
+            Log.w(TAG, "captureOnce already running")
+            return null
+        }
+        capturing = true
         try {
-            val reader = imageReader ?: return null
+            val reader = imageReader ?: run {
+                Log.w(TAG, "captureOnce: imageReader is null")
+                return null
+            }
 
-            // Try acquire; if null, wait briefly and try again
+            // Try acquire; sometimes first call returns null -> retry briefly
             var img: Image? = reader.acquireLatestImage()
             if (img == null) {
-                Thread.sleep(120) // small wait
+                Thread.sleep(100) // small wait
                 img = reader.acquireLatestImage()
             }
-            img ?: return null
+            if (img == null) {
+                // nothing available
+                return null
+            }
 
-            val plane = img.planes.firstOrNull() ?: run {
+            // Ensure image planes exist
+            val plane = img.planes.firstOrNull()
+            if (plane == null) {
+                img.close()
+                Log.w(TAG, "captureOnce: image has no planes")
+                return null
+            }
+
+            val buffer: ByteBuffer = plane.buffer
+            // compute bitmap width using rowStride / pixelStride (safer)
+            val pixelStride = plane.pixelStride
+            val rowStride = plane.rowStride
+            if (pixelStride == 0) {
+                // unexpected
+                img.close()
+                Log.w(TAG, "captureOnce: pixelStride == 0")
+                return null
+            }
+
+            val bitmapWidth = rowStride / pixelStride
+            val bitmapHeight = height
+
+            // Defensive min size
+            val bmpW = max(1, bitmapWidth)
+            val bmpH = max(1, bitmapHeight)
+
+            // Rewind buffer before copying
+            buffer.rewind()
+
+            // Create mutable bitmap and copy pixels
+            val bmp = try {
+                Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create bitmap", e)
                 img.close()
                 return null
             }
-            val buffer: ByteBuffer = plane.buffer
-            buffer.rewind()
 
-            val pixelStride = plane.pixelStride
-            val rowStride = plane.rowStride
-            val rowPadding = rowStride - pixelStride * width
-            val bitmapWidth = width + if (pixelStride != 0) rowPadding / pixelStride else 0
-
-            // create bitmap and copy safely
-            val bmp = Bitmap.createBitmap(max(1, bitmapWidth), max(1, height), Bitmap.Config.ARGB_8888)
-            bmp.copyPixelsFromBuffer(buffer)
-
-            // close image asap
-            img.close()
-
-            // crop to actual width/height if needed
-            val cropped = if (bitmapWidth != width) {
-                Bitmap.createBitmap(bmp, 0, 0, width, height)
-            } else {
-                bmp
+            try {
+                bmp.copyPixelsFromBuffer(buffer)
+            } catch (e: Exception) {
+                Log.e(TAG, "copyPixelsFromBuffer failed", e)
+                img.close()
+                bmp.recycle()
+                return null
+            } finally {
+                // close image as soon as we've copied buffer
+                try { img.close() } catch (_: Throwable) {}
             }
 
-            // callback (do not block)
-            onBitmapReady?.let {
+            // If the created bitmap is wider than actual screen, crop it
+            val finalBitmap = if (bmp.width != width || bmp.height != height) {
                 try {
-                    it(cropped)
+                    Bitmap.createBitmap(bmp, 0, 0, width.coerceAtMost(bmp.width), height.coerceAtMost(bmp.height))
+                } catch (e: Exception) {
+                    Log.e(TAG, "cropping failed", e)
+                    bmp // fallback to original
+                }
+            } else bmp
+
+            // callback (don't block the caller)
+            onBitmapReady?.let { cb ->
+                try {
+                    cb(finalBitmap)
                 } catch (e: Exception) {
                     Log.e(TAG, "onBitmapReady callback failed", e)
                 }
             }
 
-            return cropped
+            return finalBitmap
         } catch (e: Exception) {
             Log.e(TAG, "captureOnce failed", e)
             return null
+        } finally {
+            capturing = false
         }
     }
 
