@@ -16,6 +16,7 @@ import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
 import java.nio.ByteBuffer
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 class ScreenshotCapturer(
@@ -74,27 +75,45 @@ class ScreenshotCapturer(
             height = metrics.heightPixels
             density = metrics.densityDpi
 
+            Log.d(TAG, "Display size: $width x $height, density: $density")
+
             // Use RGBA_8888 pixel format (common and supported). Keep small buffer count.
             imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
 
             handlerThread = HandlerThread("ScreenCapture").apply { start() }
             handler = Handler(handlerThread!!.looper)
 
-            // Create virtual display - safe in try/catch
+            // Create virtual display - safe in try/catch with retry
             virtualDisplay = try {
                 mediaProjection?.createVirtualDisplay(
                     "screencap",
                     width,
                     height,
                     density,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC | DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY,
                     imageReader?.surface,
                     null,
                     handler
                 )
             } catch (e: IllegalStateException) {
                 Log.e(TAG, "createVirtualDisplay failed (illegal state)", e)
-                null
+                // Retry once with different flag
+                try {
+                    TimeUnit.MILLISECONDS.sleep(100)
+                    mediaProjection?.createVirtualDisplay(
+                        "screencap",
+                        width,
+                        height,
+                        density,
+                        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                        imageReader?.surface,
+                        null,
+                        handler
+                    )
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Retry createVirtualDisplay failed", e2)
+                    null
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "createVirtualDisplay failed", e)
                 null
@@ -104,6 +123,8 @@ class ScreenshotCapturer(
                 Log.e(TAG, "virtualDisplay is null after create")
                 // cleanup prepared resources
                 stop()
+            } else {
+                Log.i(TAG, "Virtual display created successfully")
             }
         } catch (e: Exception) {
             Log.e(TAG, "prepare failed", e)
@@ -130,14 +151,15 @@ class ScreenshotCapturer(
                 return null
             }
 
-            // Try acquire; sometimes first call returns null -> retry briefly
+            // Try acquire; sometimes first call returns null -> retry briefly with timeout
             var img: Image? = reader.acquireLatestImage()
             if (img == null) {
+                Log.d(TAG, "First acquireLatestImage returned null - retrying...")
                 Thread.sleep(100) // small wait
                 img = reader.acquireLatestImage()
             }
             if (img == null) {
-                // nothing available
+                Log.w(TAG, "No image available after retry")
                 return null
             }
 
