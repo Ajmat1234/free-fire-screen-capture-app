@@ -56,7 +56,7 @@ class CaptureService : Service() {
                 val wsUrl = intent.getStringExtra(EXTRA_WS_URL) ?: ""
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
 
-                // ✅ Safe way to get Parcelable Intent on Android 13+
+                // ✅ Safe Parcelable fetch for Android 13+
                 val data: Intent? = try {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         intent.getParcelableExtra(EXTRA_RESULT_INTENT, Intent::class.java)
@@ -89,7 +89,7 @@ class CaptureService : Service() {
                     return START_NOT_STICKY
                 }
 
-                // optional websocket (audio trigger)
+                // Optional websocket for sound triggers
                 if (wsUrl.isNotEmpty()) {
                     try {
                         wsClient = WebSocketClient(wsUrl) { audioUrl ->
@@ -101,11 +101,11 @@ class CaptureService : Service() {
                         }
                         wsClient?.connect()
                     } catch (e: Exception) {
-                        Log.w(TAG, "WebSocket initialization failed: ${e.message}")
+                        Log.w(TAG, "WebSocket init failed: ${e.message}")
                     }
                 }
 
-                // start capturing loop
+                // Capture loop
                 scope.launch {
                     val safeInterval = interval.coerceIn(1, 10)
                     while (isActive) {
@@ -115,7 +115,7 @@ class CaptureService : Service() {
                                 uploadBitmap(uploadUrl, bmp)
                             }
                         } catch (e: Exception) {
-                            Log.e(TAG, "Capture loop exception", e)
+                            Log.e(TAG, "Capture loop error", e)
                         }
                         delay(safeInterval * 1000L)
                     }
@@ -158,7 +158,6 @@ class CaptureService : Service() {
 
             val resp = client.newCall(req).execute()
             resp.close()
-
             Log.i(TAG, "Screenshot uploaded successfully.")
         } catch (e: Exception) {
             Log.e(TAG, "Upload failed", e)
@@ -207,7 +206,7 @@ class CaptureService : Service() {
         }
 
         try {
-            ExoPlayerManager.release(this)
+            ExoPlayerManager.release()
         } catch (e: Throwable) {
             Log.w(TAG, "ExoPlayer release failed", e)
         }
