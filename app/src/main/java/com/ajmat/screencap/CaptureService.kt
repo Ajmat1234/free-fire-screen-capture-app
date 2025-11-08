@@ -41,6 +41,7 @@ class CaptureService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var capturer: ScreenshotCapturer? = null
     private var wsClient: WebSocketClient? = null
+    private var captureCount = 0  // New: Counter for feedback
 
     override fun onCreate() {
         super.onCreate()
@@ -134,32 +135,38 @@ class CaptureService : Service() {
                     val safeInterval = interval.coerceIn(1, 10)
                     Log.d(TAG, "Starting capture loop with interval $safeInterval seconds")
                     while (isActive) {
+                        captureCount++
                         try {
-                            Log.d(TAG, "Attempting to capture screenshot...")
+                            Log.d(TAG, "Attempting to capture screenshot # $captureCount...")
                             val bmp = capturer?.captureOnce()
                             if (bmp != null) {
-                                Log.i(TAG, "Screenshot captured successfully, size: ${bmp.width}x${bmp.height}, bytes: ${bmp.byteCount}")
+                                Log.i(TAG, "Screenshot # $captureCount captured successfully, size: ${bmp.width}x${bmp.height}, bytes: ${bmp.byteCount}")
+                                updateNotification("Captured # $captureCount – Size: ${bmp.byteCount} bytes")
                                 if (uploadUrl.isNotEmpty()) {
-                                    Log.d(TAG, "Uploading screenshot to $uploadUrl...")
+                                    Log.d(TAG, "Uploading screenshot # $captureCount to $uploadUrl...")
                                     uploadBitmap(uploadUrl, bmp)
                                 } else {
-                                    Log.w(TAG, "Screenshot captured but no upload URL provided")
+                                    Log.w(TAG, "Screenshot # $captureCount captured but no upload URL provided")
                                 }
                             } else {
-                                Log.w(TAG, "Screenshot capture returned null - skipping upload")
+                                Log.w(TAG, "Screenshot # $captureCount capture returned null - skipping upload")
+                                Toast.makeText(this@CaptureService, "Capture # $captureCount failed – No screenshot", Toast.LENGTH_SHORT).show()
+                                updateNotification("Capture # $captureCount failed – No screenshot")
                             }
                         } catch (e: Exception) {
-                            Log.e(TAG, "Capture loop error", e)
+                            Log.e(TAG, "Capture loop error # $captureCount", e)
+                            Toast.makeText(this@CaptureService, "Capture # $captureCount error: ${e.message}", Toast.LENGTH_SHORT).show()
+                            updateNotification("Capture # $captureCount error")
                         }
                         delay(safeInterval * 1000L)
                     }
-                    Log.d(TAG, "Capture loop ended")
+                    Log.d(TAG, "Capture loop ended after $captureCount attempts")
                 }
                 Log.i(TAG, "Service started successfully")
             }
 
             ACTION_STOP -> {
-                Log.d(TAG, "Stopping service")
+                Log.d(TAG, "Stopping service after $captureCount captures")
                 stopSelf()
             }
         }
@@ -168,52 +175,54 @@ class CaptureService : Service() {
     }
 
     private suspend fun uploadBitmap(uploadUrl: String, bitmap: Bitmap) {
-        if (uploadUrl.isEmpty()) return
-        try {
-            Log.d(TAG, "Compressing bitmap for upload (quality 60%)")
-            val stream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 60, stream)
-            val bytes = stream.toByteArray()
-            Log.d(TAG, "Bitmap compressed to ${bytes.size} bytes")
+        if (uploadUrl.isNotEmpty()) {
+            try {
+                Log.d(TAG, "Compressing bitmap for upload (quality 60%)")
+                val stream = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 60, stream)
+                val bytes = stream.toByteArray()
+                Log.d(TAG, "Bitmap compressed to ${bytes.size} bytes")
 
-            val requestBody = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart(
-                    "file",
-                    "screenshot.jpg",
-                    bytes.toRequestBody("image/jpeg".toMediaType())
-                )
-                .build()
+                val requestBody = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart(
+                        "file",
+                        "screenshot.jpg",
+                        bytes.toRequestBody("image/jpeg".toMediaType())
+                    )
+                    .build()
 
-            val req = Request.Builder()
-                .url(uploadUrl)
-                .post(requestBody)
-                .build()
+                val req = Request.Builder()
+                    .url(uploadUrl)
+                    .post(requestBody)
+                    .build()
 
-            val client = OkHttpClient.Builder()
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS)
-                .build()
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(15, TimeUnit.SECONDS)
+                    .build()
 
-            Log.d(TAG, "Sending POST request to $uploadUrl")
-            val resp = client.newCall(req).execute()
-            val responseCode = resp.code
-            val responseBody = resp.body?.string() ?: "No response body"
-            resp.close()
-            
-            if (resp.isSuccessful) {
-                Log.i(TAG, "Screenshot uploaded successfully to $uploadUrl (code $responseCode). Response: $responseBody")
-                // Optional: Update notification or Toast for user feedback
-                updateNotification("Screenshot uploaded (size: ${bytes.size} bytes)")
-            } else {
-                Log.e(TAG, "Upload failed with code $responseCode to $uploadUrl. Response: $responseBody")
+                Log.d(TAG, "Sending POST request to $uploadUrl")
+                val resp = client.newCall(req).execute()
+                val responseCode = resp.code
+                val responseBody = resp.body?.string() ?: "No response body"
+                resp.close()
+                
+                if (resp.isSuccessful) {
+                    Log.i(TAG, "Screenshot uploaded successfully to $uploadUrl (code $responseCode). Response: $responseBody")
+                    updateNotification("Uploaded # $captureCount – Success!")
+                } else {
+                    Log.e(TAG, "Upload failed with code $responseCode to $uploadUrl. Response: $responseBody")
+                    updateNotification("Upload # $captureCount failed (code $responseCode)")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Upload failed", e)
+                updateNotification("Upload # $captureCount error: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Upload failed", e)
         }
     }
 
-    // New: Update notification text for feedback
+    // Update notification text for feedback
     private fun updateNotification(text: String) {
         val notification = createNotification(text)
         val nm = getSystemService(NotificationManager::class.java) as NotificationManager
@@ -267,7 +276,7 @@ class CaptureService : Service() {
         } catch (e: Throwable) {
             Log.w(TAG, "ExoPlayer release failed", e)
         }
-        Log.i(TAG, "Service destroyed")
+        Log.i(TAG, "Service destroyed after $captureCount captures")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
