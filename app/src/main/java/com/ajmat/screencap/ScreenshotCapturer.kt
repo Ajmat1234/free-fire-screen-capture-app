@@ -16,6 +16,7 @@ import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
 import java.nio.ByteBuffer
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 class ScreenshotCapturer(
