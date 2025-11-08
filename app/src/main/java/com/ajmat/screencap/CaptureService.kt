@@ -44,7 +44,10 @@ class CaptureService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent == null) return START_NOT_STICKY
+        if (intent == null) {
+            Log.e(TAG, "onStartCommand: intent is null")
+            return START_NOT_STICKY
+        }
 
         when (intent.action) {
             ACTION_START -> {
@@ -52,42 +55,78 @@ class CaptureService : Service() {
                 val uploadUrl = intent.getStringExtra(EXTRA_UPLOAD_URL) ?: ""
                 val wsUrl = intent.getStringExtra(EXTRA_WS_URL) ?: ""
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
-                val data: Intent? = intent.getParcelableExtra(EXTRA_RESULT_INTENT)
+
+                // ✅ Safe way to get Parcelable Intent on Android 13+
+                val data: Intent? = try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(EXTRA_RESULT_INTENT, Intent::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(EXTRA_RESULT_INTENT)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to parse EXTRA_RESULT_INTENT", e)
+                    null
+                }
 
                 if (resultCode == 0 || data == null) {
-                    Log.e(TAG, "Missing MediaProjection permission data. Stopping service.")
+                    Log.e(TAG, "Missing MediaProjection permission data. Service stopping.")
                     stopSelf()
                     return START_NOT_STICKY
                 }
 
-                startForeground(NOTIF_ID, createNotification("Capturing..."))
+                startForeground(NOTIF_ID, createNotification("Capturing screen..."))
 
-                capturer = ScreenshotCapturer(this, resultCode, data) { bitmap ->
-                    scope.launch {
-                        uploadBitmap(uploadUrl, bitmap)
+                try {
+                    capturer = ScreenshotCapturer(this, resultCode, data) { bitmap ->
+                        scope.launch {
+                            if (uploadUrl.isNotEmpty()) uploadBitmap(uploadUrl, bitmap)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to initialize ScreenshotCapturer", e)
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+
+                // optional websocket (audio trigger)
+                if (wsUrl.isNotEmpty()) {
+                    try {
+                        wsClient = WebSocketClient(wsUrl) { audioUrl ->
+                            try {
+                                ExoPlayerManager.play(this, audioUrl)
+                            } catch (e: Throwable) {
+                                Log.e(TAG, "ExoPlayerManager.play failed", e)
+                            }
+                        }
+                        wsClient?.connect()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "WebSocket initialization failed: ${e.message}")
                     }
                 }
 
-                wsClient = WebSocketClient(wsUrl) { audioUrl ->
-                    ExoPlayerManager.play(this, audioUrl)
-                }
-                wsClient?.connect()
-
+                // start capturing loop
                 scope.launch {
+                    val safeInterval = interval.coerceIn(1, 10)
                     while (isActive) {
                         try {
                             val bmp = capturer?.captureOnce()
-                            if (bmp != null && uploadUrl.isNotEmpty()) uploadBitmap(uploadUrl, bmp)
+                            if (bmp != null && uploadUrl.isNotEmpty()) {
+                                uploadBitmap(uploadUrl, bmp)
+                            }
                         } catch (e: Exception) {
-                            Log.e(TAG, "capture loop exception", e)
+                            Log.e(TAG, "Capture loop exception", e)
                         }
-                        delay((interval.coerceIn(1, 10)) * 1000L)
+                        delay(safeInterval * 1000L)
                     }
                 }
             }
 
-            ACTION_STOP -> stopSelf()
+            ACTION_STOP -> {
+                stopSelf()
+            }
         }
+
         return START_STICKY
     }
 
@@ -95,10 +134,10 @@ class CaptureService : Service() {
         if (uploadUrl.isEmpty()) return
         try {
             val stream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 50, stream)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 60, stream)
             val bytes = stream.toByteArray()
 
-            val multipartBody = MultipartBody.Builder()
+            val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart(
                     "file",
@@ -109,33 +148,34 @@ class CaptureService : Service() {
 
             val req = Request.Builder()
                 .url(uploadUrl)
-                .post(multipartBody)
+                .post(requestBody)
                 .build()
 
-            OkHttpClient.Builder()
-                .callTimeout(30, TimeUnit.SECONDS)
+            val client = OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
                 .build()
-                .newCall(req)
-                .execute()
-                .close()
 
+            val resp = client.newCall(req).execute()
+            resp.close()
+
+            Log.i(TAG, "Screenshot uploaded successfully.")
         } catch (e: Exception) {
-            Log.e(TAG, "upload failed", e)
+            Log.e(TAG, "Upload failed", e)
         }
     }
 
     private fun createNotification(text: String): Notification {
         val intent = Intent(this, MainActivity::class.java)
-        val pi = PendingIntent.getActivity(
-            this, 0, intent,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
-        )
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+        val pi = PendingIntent.getActivity(this, 0, intent, flags)
+
         return NotificationCompat.Builder(this, NOTIF_CHANNEL)
-            .setContentTitle("Screen Capture running")
+            .setContentTitle("Screen Capture Running")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentIntent(pi)
             .setOngoing(true)
+            .setContentIntent(pi)
             .build()
     }
 
@@ -144,7 +184,7 @@ class CaptureService : Service() {
             val nm = getSystemService(NotificationManager::class.java)
             val ch = NotificationChannel(
                 NOTIF_CHANNEL,
-                "Screen capture",
+                "Screen Capture Service",
                 NotificationManager.IMPORTANCE_LOW
             )
             nm.createNotificationChannel(ch)
@@ -154,9 +194,23 @@ class CaptureService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         scope.cancel()
-        capturer?.stop()
-        wsClient?.close()
-        ExoPlayerManager.release()
+        try {
+            capturer?.stop()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Capturer stop failed", e)
+        }
+
+        try {
+            wsClient?.close()
+        } catch (e: Throwable) {
+            Log.w(TAG, "WebSocket close failed", e)
+        }
+
+        try {
+            ExoPlayerManager.release(this)
+        } catch (e: Throwable) {
+            Log.w(TAG, "ExoPlayer release failed", e)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
