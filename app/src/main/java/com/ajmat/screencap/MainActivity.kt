@@ -2,16 +2,15 @@ package com.ajmat.screencap
 
 import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Bundle
-import android.os.PersistableBundle
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import android.media.projection.MediaProjectionManager
-import android.os.Build
 
 class MainActivity : AppCompatActivity() {
 
@@ -41,7 +40,6 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // restore projection data if activity recreated
         if (savedInstanceState != null) {
             resultCode = savedInstanceState.getInt("resultCode", 0)
             resultData = savedInstanceState.getParcelable("resultData")
@@ -67,7 +65,6 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            // request MediaProjection permission if not already
             if (resultData == null) {
                 val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                 val intent = mpm.createScreenCaptureIntent()
