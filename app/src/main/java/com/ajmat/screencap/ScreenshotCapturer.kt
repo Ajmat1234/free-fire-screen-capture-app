@@ -10,6 +10,7 @@ import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.DisplayMetrics
@@ -49,6 +50,7 @@ class ScreenshotCapturer(
                 val mpm = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
                 mediaProjection = mpm?.getMediaProjection(resultCode, resultData)
                 if (mediaProjection != null) {
+                    Log.d(TAG, "MediaProjection created successfully")
                     prepare()
                 } else {
                     Log.e(TAG, "MediaProjection is null in init")
@@ -64,6 +66,7 @@ class ScreenshotCapturer(
 
     private fun prepare() {
         try {
+            Log.d(TAG, "prepare() called")
             val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
             val display = wm?.defaultDisplay ?: run {
                 Log.e(TAG, "No default display")
@@ -72,40 +75,53 @@ class ScreenshotCapturer(
             val metrics = DisplayMetrics()
             display.getRealMetrics(metrics)
             width = metrics.widthPixels
-            height = metrics.heightPixels
+            height = heightPixels
             density = metrics.densityDpi
 
             Log.d(TAG, "Display size: $width x $height, density: $density")
 
-            // Use RGBA_8888 pixel format (common and supported). Keep small buffer count.
+            // Use RGBA_8888 pixel format. Keep small buffer count.
             imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+            Log.d(TAG, "ImageReader created")
 
             handlerThread = HandlerThread("ScreenCapture").apply { start() }
             handler = Handler(handlerThread!!.looper)
+            Log.d(TAG, "Handler thread started")
 
-            // Create virtual display - safe in try/catch with retry
+            // Create virtual display - safe in try/catch with retry for Android 15
             virtualDisplay = try {
+                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                    // Android 15 specific flags: OWN_CONTENT_ONLY and PUBLIC for stricter security
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
+                } else {
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
+                }
                 mediaProjection?.createVirtualDisplay(
                     "screencap",
                     width,
                     height,
                     density,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY,
+                    flags,
                     imageReader?.surface,
                     null,
                     handler
                 )
             } catch (e: IllegalStateException) {
                 Log.e(TAG, "createVirtualDisplay failed (illegal state)", e)
-                // Retry once with different flag
+                // Retry with alternative flags for Android 15
                 try {
-                    TimeUnit.MILLISECONDS.sleep(100)
+                    TimeUnit.MILLISECONDS.sleep(200) // Longer wait for Android 15
+                    val retryFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
+                    } else {
+                        DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
+                    }
                     mediaProjection?.createVirtualDisplay(
-                        "screencap",
+                        "screencap_retry",
                         width,
                         height,
                         density,
-                        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                        retryFlags,
                         imageReader?.surface,
                         null,
                         handler
@@ -120,11 +136,11 @@ class ScreenshotCapturer(
             }
 
             if (virtualDisplay == null) {
-                Log.e(TAG, "virtualDisplay is null after create")
+                Log.e(TAG, "virtualDisplay is null after create - stopping")
                 // cleanup prepared resources
                 stop()
             } else {
-                Log.i(TAG, "Virtual display created successfully")
+                Log.i(TAG, "Virtual display created successfully with flags")
             }
         } catch (e: Exception) {
             Log.e(TAG, "prepare failed", e)
