@@ -1,4 +1,4 @@
-package com.example.screencap
+package com.ajmat.screencap
 
 import android.content.Context
 import com.google.android.exoplayer2.ExoPlayer
