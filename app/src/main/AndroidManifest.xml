@@ -37,7 +37,6 @@
             android:name=".CaptureService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection|mediaPlayback"
-            android:projectMedia="true"
             android:stopWithTask="false"
             tools:targetApi="34" />
     </application>
