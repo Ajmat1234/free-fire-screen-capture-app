@@ -1,13 +1,15 @@
-// build.gradle (project)
 buildscript {
     repositories {
         google()
         mavenCentral()
+        gradlePluginPortal()   // 👈 यह जरूरी है Kotlin plugin को लाने के लिए
     }
     dependencies {
         classpath "com.android.tools.build:gradle:8.1.0"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.0"
     }
 }
+
 allprojects {
     repositories {
         google()
