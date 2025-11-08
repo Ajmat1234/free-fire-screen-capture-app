@@ -1,20 +1,17 @@
 package com.ajmat.screencap
 
-import android.app.Activity
+import android.content.Context
 import android.content.Intent
-import android.media.projection.MediaProjectionManager
 import android.os.Bundle
+import android.os.PersistableBundle
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import android.content.Context
-import android.content.ComponentName
-import android.content.IntentFilter
+import android.media.projection.MediaProjectionManager
 import android.os.Build
-import android.provider.Settings
-import android.widget.Toast
 
 class MainActivity : AppCompatActivity() {
 
@@ -29,11 +26,10 @@ class MainActivity : AppCompatActivity() {
     private var resultData: Intent? = null
 
     private val requestProjection = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
+        if (result.resultCode == RESULT_OK) {
             resultCode = result.resultCode
             resultData = result.data
             statusTv.text = "Status: Permission granted"
-            // Start service after permission
             startCaptureService()
         } else {
             Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
@@ -44,6 +40,12 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // restore projection data if activity recreated
+        if (savedInstanceState != null) {
+            resultCode = savedInstanceState.getInt("resultCode", 0)
+            resultData = savedInstanceState.getParcelable("resultData")
+        }
 
         intervalInput = findViewById(R.id.intervalInput)
         uploadUrlInput = findViewById(R.id.uploadUrlInput)
@@ -83,10 +85,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt("resultCode", resultCode)
+        outState.putParcelable("resultData", resultData)
+    }
+
     private fun startCaptureService() {
-        val interval = intervalInput.text.toString().toInt()
+        val interval = intervalInput.text.toString().toIntOrNull() ?: 1
         val uploadUrl = uploadUrlInput.text.toString().trim()
         val wsUrl = wsUrlInput.text.toString().trim()
+
+        if (resultData == null || resultCode == 0) {
+            Toast.makeText(this, "Please grant screen capture permission first", Toast.LENGTH_SHORT).show()
+            return
+        }
 
         val svc = Intent(this, CaptureService::class.java).apply {
             action = CaptureService.ACTION_START
@@ -96,15 +109,13 @@ class MainActivity : AppCompatActivity() {
             putExtra(CaptureService.EXTRA_RESULT_CODE, resultCode)
             putExtra(CaptureService.EXTRA_RESULT_INTENT, resultData)
         }
-        startForegroundServiceCompat(svc)
-        statusTv.text = "Status: started (interval ${interval}s)"
-    }
 
-    private fun startForegroundServiceCompat(intent: Intent) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
+            startForegroundService(svc)
         } else {
-            startService(intent)
+            startService(svc)
         }
+
+        statusTv.text = "Status: started (interval ${interval}s)"
     }
 }
