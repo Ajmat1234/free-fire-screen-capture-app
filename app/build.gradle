@@ -36,7 +36,7 @@ android {
 
     // Enable view binding (for R references)
     buildFeatures {
-        viewBinding = true
+    viewBinding = true
     }
 }
 
