@@ -4,28 +4,39 @@ plugins {
 }
 
 android {
-    namespace 'com.ajmat.screencap'
-    compileSdk 34
+    namespace = "com.ajmat.screencap"
+    compileSdk = 34
 
     defaultConfig {
-        applicationId "com.ajmat.screencap"
-        minSdk 23
-        targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        applicationId = "com.ajmat.screencap"
+        minSdk = 23
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0"
     }
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile('proguard-android-optimize.txt'),
+                'proguard-rules.pro'
+            )
         }
     }
+
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    // Enable view binding (for R references)
+    buildFeatures {
+        viewBinding = true
     }
 }
 
@@ -34,14 +45,15 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.9.0'
+
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     implementation 'com.squareup.okhttp3:okhttp:4.11.0'
     implementation 'com.google.code.gson:gson:2.10.1'
 
-    // ✅ Updated ExoPlayer (Media3)
+    // ✅ Modern ExoPlayer (Media3)
     implementation 'androidx.media3:media3-exoplayer:1.4.1'
     implementation 'androidx.media3:media3-ui:1.4.1'
 
-    // Optional permissions helper
+    // Optional: permission helper
     implementation 'com.karumi:dexter:6.2.3'
 }
