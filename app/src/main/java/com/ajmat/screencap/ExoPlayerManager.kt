@@ -13,7 +13,9 @@ object ExoPlayerManager {
             if (player == null) {
                 player = ExoPlayer.Builder(context).build()
             }
-            val item = MediaItem.fromUri(url)
+            val item = MediaItem.Builder()
+    .setUri(url)
+    .build()
             player?.setMediaItem(item)
             player?.prepare()
             player?.playWhenReady = true
