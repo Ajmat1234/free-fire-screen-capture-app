@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.ajmat.screencap">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -11,8 +11,11 @@
         android:label="ScreenCapture"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:allowBackup="true">
+        android:allowBackup="true"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
 
+        <!-- Main launcher activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -22,7 +25,7 @@
             </intent-filter>
         </activity>
 
-        <!-- foregroundServiceType should include mediaProjection and mediaPlayback -->
+        <!-- Foreground service for screen capture -->
         <service
             android:name=".CaptureService"
             android:exported="false"
