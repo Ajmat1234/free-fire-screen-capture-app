@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.Manifest
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -73,6 +75,15 @@ class CaptureService : Service() {
                     Log.e(TAG, "Missing MediaProjection permission data. Service stopping.")
                     stopSelf()
                     return START_NOT_STICKY
+                }
+
+                // ✅ Android 14+ (API 34) check for FOREGROUND_SERVICE_MEDIA_PROJECTION permission
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    if (checkSelfPermission(Manifest.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION) != PackageManager.PERMISSION_GRANTED) {
+                        Log.e(TAG, "Missing FOREGROUND_SERVICE_MEDIA_PROJECTION permission. Service stopping.")
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
                 }
 
                 startForeground(NOTIF_ID, createNotification("Capturing screen..."))
