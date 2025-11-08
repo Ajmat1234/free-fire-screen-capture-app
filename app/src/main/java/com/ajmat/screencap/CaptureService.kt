@@ -12,6 +12,7 @@ import android.Manifest
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 import okhttp3.*
@@ -19,6 +20,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MultipartBody
 
 class CaptureService : Service() {
 
@@ -73,6 +75,7 @@ class CaptureService : Service() {
 
                 if (resultCode == 0 || data == null) {
                     Log.e(TAG, "Missing MediaProjection permission data. Service stopping.")
+                    Toast.makeText(this, "Screen capture permission denied. Service stopping.", Toast.LENGTH_LONG).show()
                     stopSelf()
                     return START_NOT_STICKY
                 }
@@ -81,6 +84,7 @@ class CaptureService : Service() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     if (checkSelfPermission(Manifest.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION) != PackageManager.PERMISSION_GRANTED) {
                         Log.e(TAG, "Missing FOREGROUND_SERVICE_MEDIA_PROJECTION permission. Service stopping.")
+                        Toast.makeText(this, "Foreground service permission missing. Check app settings.", Toast.LENGTH_LONG).show()
                         stopSelf()
                         return START_NOT_STICKY
                     }
@@ -96,6 +100,7 @@ class CaptureService : Service() {
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to initialize ScreenshotCapturer", e)
+                    Toast.makeText(this, "Screenshot capturer init failed: ${e.message}", Toast.LENGTH_LONG).show()
                     stopSelf()
                     return START_NOT_STICKY
                 }
