@@ -2,11 +2,11 @@ buildscript {
     repositories {
         google()
         mavenCentral()
-        gradlePluginPortal()   // 👈 यह जरूरी है Kotlin plugin को लाने के लिए
+        gradlePluginPortal()
     }
     dependencies {
-        classpath "com.android.tools.build:gradle:8.2.0"
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.10"
+        classpath "com.android.tools.build:gradle:8.5.2"  // Updated for SDK 34 full support
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25"
     }
 }
 
