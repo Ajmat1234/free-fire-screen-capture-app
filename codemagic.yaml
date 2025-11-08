@@ -1,7 +1,7 @@
 workflows:
   android-build:
     name: Android build
-    instance_type: linux
+    instance_type: mac_mini_m2
     environment:
       vars:
         GRADLE_OPTS: "-Xmx1024m"
