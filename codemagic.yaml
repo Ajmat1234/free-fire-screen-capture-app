@@ -6,13 +6,11 @@ workflows:
       vars:
         GRADLE_OPTS: "-Xmx1024m"
     scripts:
-      - name: Install JDK / verify
+      - name: Generate Gradle wrapper
         script: |
-          echo "Using Java:"
-          java -version || true
+          gradle wrapper
       - name: Build debug APK
         script: |
-          chmod +x ./gradlew
           ./gradlew assembleDebug
     artifacts:
       - app/build/outputs/apk/debug/app-debug.apk
