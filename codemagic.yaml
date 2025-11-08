@@ -6,6 +6,15 @@ workflows:
       vars:
         GRADLE_OPTS: "-Xmx1024m"
     scripts:
+      - name: Install Android SDK 34 & Build Tools  # Key fix: Install API 34
+        script: |
+          # Accept licenses
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          # Install platform and build tools for API 34
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          # Re-accept if needed
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          echo "SDK 34 installed successfully!"
       - name: Generate Gradle wrapper
         script: |
           gradle wrapper
