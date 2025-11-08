@@ -1,0 +1,13 @@
+workflows:
+  android-build:
+    name: Android build
+    instance_type: standard
+    environment:
+      vars:
+        GRADLE_OPTS: "-Xmx1024m"
+    scripts:
+      - name: Build debug APK
+        script: |
+          ./gradlew assembleDebug
+    artifacts:
+      - app/build/outputs/apk/debug/app-debug.apk
