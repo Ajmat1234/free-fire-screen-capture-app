@@ -1,4 +1,4 @@
-package com.example.screencap
+package com.ajmat.screencap
 
 import android.app.Notification
 import android.app.NotificationChannel
