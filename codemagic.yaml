@@ -5,42 +5,45 @@ workflows:
     environment:
       vars:
         GRADLE_OPTS: "-Xmx1024m"
-        ANDROID_HOME: /usr/local/share/android-sdk  # Explicit for safety
+        ANDROID_HOME: /usr/local/share/android-sdk
     scripts:
-      - name: Manual Install Latest Command-Line Tools (v13.0)  # Manual download to fix XML v4 & AAPT
+      - name: Manual Install Latest Command-Line Tools (v13.0)  # Clean old first
         script: |
           export ANDROID_HOME=/usr/local/share/android-sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          # Clean old latest symlink
+          rm -rf $ANDROID_HOME/cmdline-tools/latest
           mkdir -p $ANDROID_HOME/cmdline-tools
           cd $ANDROID_HOME/cmdline-tools
-          # Download latest macOS command-line tools (v13.0, fixes XML v4 support)
+          # Download & unzip
           curl -o commandlinetools.zip https://dl.google.com/android/repository/commandlinetools-mac-13114758_latest.zip
           unzip commandlinetools.zip
           rm commandlinetools.zip
           mv cmdline-tools latest
-          # Update PATH
+          # PATH refresh
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          # Accept licenses
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-          echo "Latest cmdline-tools (v13.0) installed & PATH updated: $PATH"
-      - name: Install Android SDK 34 & Build Tools  # Now with new tools
+          echo "Latest cmdline-tools installed. PATH: $PATH"
+      - name: Install Android SDK 34 & Build Tools + Platform Tools  # Add platform-tools for AAPT2
         script: |
           export ANDROID_HOME=/usr/local/share/android-sdk
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          # Uninstall old to avoid corruption
-          sdkmanager --uninstall "build-tools;33.0.1" "build-tools;34.0.0" || true
+          # Uninstall old
+          sdkmanager --uninstall "build-tools;33.0.1" "build-tools;34.0.0" "platform-tools" || true
           # Install fresh
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
           yes | sdkmanager --licenses
-          # Verify AAPT from new build-tools (should print version without error)
+          # Verify AAPT2
           $ANDROID_HOME/build-tools/34.0.0/aapt2 version
-          echo "SDK 34 & Build-Tools 34.0.0 installed! AAPT ready for API 34 attributes."
-      - name: Generate Gradle wrapper  # Fixed: Use 'gradle wrapper' to create gradlew first
+          echo "SDK 34, Build-Tools 34.0.0 & Platform-Tools installed!"
+      - name: Generate Gradle wrapper
         script: |
-          gradle wrapper  # Global gradle to generate ./gradlew
-          echo "Gradle wrapper generated successfully!"
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          gradle wrapper
+          echo "Gradle wrapper generated!"
       - name: Build debug APK
         script: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          ./gradlew assembleDebug  # Now use ./gradlew
+          ./gradlew clean assembleDebug  # Clean + assemble for fresh build
     artifacts:
       - app/build/outputs/apk/debug/app-debug.apk
