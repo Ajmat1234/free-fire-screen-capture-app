@@ -3,7 +3,6 @@ package com.ajmat.screencap
 import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.MediaItemBuilder
 
 object ExoPlayerManager {
     private var player: ExoPlayer? = null
@@ -13,19 +12,20 @@ object ExoPlayerManager {
             if (player == null) {
                 player = ExoPlayer.Builder(context).build()
             }
+
             val item = MediaItem.Builder()
-    .setUri(url)
-    .build()
+                .setUri(url)
+                .build()
+
             player?.setMediaItem(item)
             player?.prepare()
             player?.playWhenReady = true
         } catch (e: Throwable) {
-            // prevent crash if media libs missing or bad url
             e.printStackTrace()
         }
     }
 
-    fun release(context: Context) {
+    fun release() {
         try {
             player?.release()
         } catch (e: Throwable) {
