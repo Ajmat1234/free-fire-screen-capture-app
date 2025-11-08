@@ -43,6 +43,7 @@ class CaptureService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) return START_NOT_STICKY
+
         when (intent.action) {
             ACTION_START -> {
                 val interval = intent.getIntExtra(EXTRA_INTERVAL, 1)
@@ -51,33 +52,53 @@ class CaptureService : Service() {
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
                 val data: Intent? = intent.getParcelableExtra(EXTRA_RESULT_INTENT)
 
+                // Validate media projection permission BEFORE creating capturer
+                if (resultCode == 0 || data == null) {
+                    Log.e(TAG, "Missing MediaProjection permission data. Stopping service.")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+
                 startForeground(NOTIF_ID, createNotification("Capturing..."))
 
-                capturer = ScreenshotCapturer(this, resultCode, data) { bitmap ->
-                    // When a screenshot is ready, upload it
-                    scope.launch {
-                        uploadBitmap(uploadUrl, bitmap)
+                try {
+                    capturer = ScreenshotCapturer(this, resultCode, data) { bitmap ->
+                        scope.launch {
+                            uploadBitmap(uploadUrl, bitmap)
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to create ScreenshotCapturer", e)
+                    stopSelf()
+                    return START_NOT_STICKY
                 }
 
                 // connect websocket for audio triggers
-                wsClient = WebSocketClient(wsUrl) { audioUrl ->
-                    // play audio via ExoPlayer
-                    ExoPlayerManager.play(this, audioUrl)
+                try {
+                    wsClient = WebSocketClient(wsUrl) { audioUrl ->
+                        // play audio via ExoPlayer safely
+                        try {
+                            ExoPlayerManager.play(this, audioUrl)
+                        } catch (e: Throwable) {
+                            Log.e(TAG, "Exo playback error", e)
+                        }
+                    }
+                    wsClient?.connect()
+                } catch (e: Exception) {
+                    Log.e(TAG, "WebSocket client init failed", e)
+                    // continue anyway; audio optional
                 }
-                wsClient?.connect()
 
                 // schedule repeated capture
                 scope.launch {
                     while (isActive) {
                         try {
                             val bmp = capturer?.captureOnce()
-                            // upload handled in callback too, but captureOnce returns bitmap for sync use
-                            if (bmp != null) uploadBitmap(uploadUrl, bmp)
+                            if (bmp != null && uploadUrl.isNotEmpty()) uploadBitmap(uploadUrl, bmp)
                         } catch (e: Exception) {
                             Log.e(TAG, "capture loop exception", e)
                         }
-                        delay(interval * 1000L)
+                        delay((interval.coerceIn(1, 10)) * 1000L)
                     }
                 }
             }
@@ -89,15 +110,16 @@ class CaptureService : Service() {
     }
 
     private suspend fun uploadBitmap(uploadUrl: String, bitmap: Bitmap) {
+        if (uploadUrl.isEmpty()) return
         try {
             val stream = ByteArrayOutputStream()
-            // compress to jpeg low quality for smaller size
             bitmap.compress(Bitmap.CompressFormat.JPEG, 50, stream)
             val bytes = stream.toByteArray()
 
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
-                .addFormDataPart("file", "screenshot.jpg", RequestBody.create("image/jpeg".toMediaTypeOrNull(), bytes))
+                .addFormDataPart("file", "screenshot.jpg",
+                    RequestBody.create("image/jpeg".toMediaTypeOrNull(), bytes))
                 .build()
 
             val req = Request.Builder()
@@ -115,7 +137,8 @@ class CaptureService : Service() {
 
     private fun createNotification(text: String): Notification {
         val intent = Intent(this, MainActivity::class.java)
-        val pi = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        val pi = PendingIntent.getActivity(this, 0, intent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         return NotificationCompat.Builder(this, NOTIF_CHANNEL)
             .setContentTitle("Screen Capture running")
             .setContentText(text)
@@ -136,9 +159,9 @@ class CaptureService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         scope.cancel()
-        capturer?.stop()
-        wsClient?.close()
-        ExoPlayerManager.release(this)
+        try { capturer?.stop() } catch (e: Throwable) { e.printStackTrace() }
+        try { wsClient?.close() } catch (e: Throwable) { e.printStackTrace() }
+        try { ExoPlayerManager.release(this) } catch (e: Throwable) { e.printStackTrace() }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
