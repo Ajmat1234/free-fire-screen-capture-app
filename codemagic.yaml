@@ -1,13 +1,18 @@
 workflows:
   android-build:
     name: Android build
-    instance_type: standard
+    instance_type: linux
     environment:
       vars:
         GRADLE_OPTS: "-Xmx1024m"
     scripts:
+      - name: Install JDK / verify
+        script: |
+          echo "Using Java:"
+          java -version || true
       - name: Build debug APK
         script: |
+          chmod +x ./gradlew
           ./gradlew assembleDebug
     artifacts:
       - app/build/outputs/apk/debug/app-debug.apk
