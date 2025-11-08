@@ -45,6 +45,7 @@ class CaptureService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        Log.d(TAG, "Service created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -59,6 +60,8 @@ class CaptureService : Service() {
                 val uploadUrl = intent.getStringExtra(EXTRA_UPLOAD_URL) ?: ""
                 val wsUrl = intent.getStringExtra(EXTRA_WS_URL) ?: ""
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
+
+                Log.d(TAG, "Starting service with interval=$interval, uploadUrl=$uploadUrl, wsUrl=$wsUrl")
 
                 // ✅ Safe Parcelable fetch for Android 13+
                 val data: Intent? = try {
@@ -90,14 +93,17 @@ class CaptureService : Service() {
                     }
                 }
 
+                Log.d(TAG, "Starting foreground notification")
                 startForeground(NOTIF_ID, createNotification("Capturing screen..."))
 
                 try {
+                    Log.d(TAG, "Initializing ScreenshotCapturer")
                     capturer = ScreenshotCapturer(this, resultCode, data) { bitmap ->
                         scope.launch {
                             if (uploadUrl.isNotEmpty()) uploadBitmap(uploadUrl, bitmap)
                         }
                     }
+                    Log.i(TAG, "ScreenshotCapturer initialized successfully")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to initialize ScreenshotCapturer", e)
                     Toast.makeText(this, "Screenshot capturer init failed: ${e.message}", Toast.LENGTH_LONG).show()
@@ -108,6 +114,7 @@ class CaptureService : Service() {
                 // Optional websocket for sound triggers
                 if (wsUrl.isNotEmpty()) {
                     try {
+                        Log.d(TAG, "Initializing WebSocket")
                         wsClient = WebSocketClient(wsUrl) { audioUrl ->
                             try {
                                 ExoPlayerManager.play(this, audioUrl)
@@ -116,6 +123,7 @@ class CaptureService : Service() {
                             }
                         }
                         wsClient?.connect()
+                        Log.i(TAG, "WebSocket connected")
                     } catch (e: Exception) {
                         Log.w(TAG, "WebSocket init failed: ${e.message}")
                     }
@@ -124,21 +132,34 @@ class CaptureService : Service() {
                 // Capture loop
                 scope.launch {
                     val safeInterval = interval.coerceIn(1, 10)
+                    Log.d(TAG, "Starting capture loop with interval $safeInterval seconds")
                     while (isActive) {
                         try {
+                            Log.d(TAG, "Attempting to capture screenshot...")
                             val bmp = capturer?.captureOnce()
-                            if (bmp != null && uploadUrl.isNotEmpty()) {
-                                uploadBitmap(uploadUrl, bmp)
+                            if (bmp != null) {
+                                Log.i(TAG, "Screenshot captured successfully, size: ${bmp.width}x${bmp.height}, bytes: ${bmp.byteCount}")
+                                if (uploadUrl.isNotEmpty()) {
+                                    Log.d(TAG, "Uploading screenshot to $uploadUrl...")
+                                    uploadBitmap(uploadUrl, bmp)
+                                } else {
+                                    Log.w(TAG, "Screenshot captured but no upload URL provided")
+                                }
+                            } else {
+                                Log.w(TAG, "Screenshot capture returned null - skipping upload")
                             }
                         } catch (e: Exception) {
                             Log.e(TAG, "Capture loop error", e)
                         }
                         delay(safeInterval * 1000L)
                     }
+                    Log.d(TAG, "Capture loop ended")
                 }
+                Log.i(TAG, "Service started successfully")
             }
 
             ACTION_STOP -> {
+                Log.d(TAG, "Stopping service")
                 stopSelf()
             }
         }
@@ -149,9 +170,11 @@ class CaptureService : Service() {
     private suspend fun uploadBitmap(uploadUrl: String, bitmap: Bitmap) {
         if (uploadUrl.isEmpty()) return
         try {
+            Log.d(TAG, "Compressing bitmap for upload (quality 60%)")
             val stream = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.JPEG, 60, stream)
             val bytes = stream.toByteArray()
+            Log.d(TAG, "Bitmap compressed to ${bytes.size} bytes")
 
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
@@ -172,12 +195,29 @@ class CaptureService : Service() {
                 .readTimeout(15, TimeUnit.SECONDS)
                 .build()
 
+            Log.d(TAG, "Sending POST request to $uploadUrl")
             val resp = client.newCall(req).execute()
+            val responseCode = resp.code
+            val responseBody = resp.body?.string() ?: "No response body"
             resp.close()
-            Log.i(TAG, "Screenshot uploaded successfully.")
+            
+            if (resp.isSuccessful) {
+                Log.i(TAG, "Screenshot uploaded successfully to $uploadUrl (code $responseCode). Response: $responseBody")
+                // Optional: Update notification or Toast for user feedback
+                updateNotification("Screenshot uploaded (size: ${bytes.size} bytes)")
+            } else {
+                Log.e(TAG, "Upload failed with code $responseCode to $uploadUrl. Response: $responseBody")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Upload failed", e)
         }
+    }
+
+    // New: Update notification text for feedback
+    private fun updateNotification(text: String) {
+        val notification = createNotification(text)
+        val nm = getSystemService(NotificationManager::class.java) as NotificationManager
+        nm.notify(NOTIF_ID, notification)
     }
 
     private fun createNotification(text: String): Notification {
@@ -208,6 +248,7 @@ class CaptureService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "Service destroying...")
         scope.cancel()
         try {
             capturer?.stop()
@@ -226,6 +267,7 @@ class CaptureService : Service() {
         } catch (e: Throwable) {
             Log.w(TAG, "ExoPlayer release failed", e)
         }
+        Log.i(TAG, "Service destroyed")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
