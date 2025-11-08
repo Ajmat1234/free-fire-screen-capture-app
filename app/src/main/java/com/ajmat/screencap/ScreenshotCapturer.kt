@@ -16,7 +16,6 @@ import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
 import java.nio.ByteBuffer
-import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 class ScreenshotCapturer(
@@ -90,7 +89,7 @@ class ScreenshotCapturer(
                     width,
                     height,
                     density,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC | DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY,
                     imageReader?.surface,
                     null,
                     handler
