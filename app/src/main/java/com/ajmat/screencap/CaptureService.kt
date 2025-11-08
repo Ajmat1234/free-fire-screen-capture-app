@@ -15,6 +15,8 @@ import kotlinx.coroutines.*
 import okhttp3.*
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class CaptureService : Service() {
 
@@ -118,9 +120,11 @@ class CaptureService : Service() {
 
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
-                .addFormDataPart("file", "screenshot.jpg",
-                    RequestBody.create("image/jpeg".toMediaTypeOrNull(), bytes))
-                .build()
+                .addFormDataPart(
+    "file",
+    "screenshot.jpg",
+    bytes.toRequestBody("image/jpeg".toMediaType())
+)
 
             val req = Request.Builder()
                 .url(uploadUrl)
