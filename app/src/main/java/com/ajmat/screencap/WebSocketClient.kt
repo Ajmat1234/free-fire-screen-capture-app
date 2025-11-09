@@ -4,9 +4,11 @@ import android.util.Log
 import com.google.gson.Gson
 import kotlinx.coroutines.*
 import okhttp3.*
+import okhttp3.internal.ws.RealWebSocket  // For internal access if needed, but avoid
 import java.util.Map
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random  // For jitter
+import okhttp3.ByteString  // For sendPong
 
 class WebSocketClient(
     private val wsUrl: String,
@@ -29,6 +31,7 @@ class WebSocketClient(
     private val reconnectAttempts = AtomicInteger(0)
     private var isClosedManually = false
     private var pingJob: Job? = null
+    private var isConnected = false  // Manual health flag
 
     fun connect() {
         if (wsUrl.isBlank()) {
@@ -48,6 +51,7 @@ class WebSocketClient(
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     Log.i(TAG, "Connected successfully")
                     reconnectAttempts.set(0)
+                    isConnected = true
                     onStatusChange("Connected")  // UI update
                     startPingScheduler()  // Start pings
                 }
@@ -71,12 +75,14 @@ class WebSocketClient(
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     Log.e(TAG, "Connection failure: ${t.message}", t)
+                    isConnected = false
                     onStatusChange("Reconnecting... (Attempt ${reconnectAttempts.get() + 1})")
                     scheduleReconnect()
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     Log.i(TAG, "Connection closed: $code - $reason")
+                    isConnected = false
                     stopPingScheduler()
                     if (!isClosedManually) {
                         onStatusChange("Disconnected - Reconnecting...")
@@ -84,10 +90,6 @@ class WebSocketClient(
                     } else {
                         onStatusChange("Disconnected")
                     }
-                }
-
-                override fun onPong(webSocket: WebSocket, bytes: okhttp3.ResponseBody) {
-                    Log.d(TAG, "Pong received - Connection healthy")
                 }
             })
         } catch (e: Exception) {
@@ -100,13 +102,14 @@ class WebSocketClient(
     private fun startPingScheduler() {
         stopPingScheduler()  // Cancel previous if any
         pingJob = scope.launch {
-            while (isActive && ws?.isHealthy == true) {
+            while (isActive && isConnected) {  // Use manual flag
                 delay(PING_INTERVAL_MS)
                 try {
-                    ws?.sendPong(ByteArray(0))  // Send PING (OkHttp handles as PONG response)
+                    ws?.sendPong(ByteString.EMPTY)  // Correct: ByteString.EMPTY
                     Log.d(TAG, "Ping sent to keep Render alive")
                 } catch (e: Exception) {
                     Log.e(TAG, "Ping failed", e)
+                    isConnected = false
                     break  // Trigger reconnect
                 }
             }
@@ -142,6 +145,7 @@ class WebSocketClient(
 
     fun close() {
         isClosedManually = true
+        isConnected = false
         stopPingScheduler()
         try {
             ws?.close(1000, "Manual close")
