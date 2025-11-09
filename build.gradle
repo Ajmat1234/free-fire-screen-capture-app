@@ -10,9 +10,10 @@ buildscript {
     }
 }
 
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
+// Removed: allprojects block - now managed by settings.gradle to avoid FAIL_ON_PROJECT_REPOS conflict
+// allprojects {
+//     repositories {
+//         google()
+//         mavenCentral()
+//     }
+// }
