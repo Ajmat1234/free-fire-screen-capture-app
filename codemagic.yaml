@@ -21,26 +21,44 @@ workflows:
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
           echo "Latest cmdline-tools installed. PATH: $PATH"
-      - name: Install Android SDK 34 & Build Tools + Platform Tools  # With Java 8
+      - name: Install Android SDK 35 & Build Tools + Platform Tools  # Updated for SDK 35
         script: |
           export ANDROID_HOME=/usr/local/share/android-sdk
           export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home  # Key: For proper installation
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          sdkmanager --uninstall "build-tools;33.0.1" "build-tools;34.0.0" "platform-tools" || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          sdkmanager --uninstall "build-tools;33.0.1" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools" || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
           yes | sdkmanager --licenses
-          $ANDROID_HOME/build-tools/34.0.0/aapt2 version  # Verify
-          echo "SDK 34 installed with proper tools!"
-      - name: Generate Gradle wrapper
+          $ANDROID_HOME/build-tools/35.0.0/aapt2 version  # Verify
+          echo "SDK 35 installed with proper tools!"
+      - name: Install/Update Gradle via Homebrew  # New: Ensure Gradle available for wrapper generation
         script: |
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          gradle wrapper
+          brew install gradle
+          export PATH=/opt/homebrew/bin:$PATH  # For M2 macOS
+          gradle --version
+          echo "Gradle installed/updated successfully"
+      - name: Generate Gradle wrapper  # Updated: Specify version for AGP 8.5 compatibility
+        script: |
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:/opt/homebrew/bin:$PATH
+          cd $CM_BUILD_DIR  # Ensure in project root
+          if [ ! -f "gradlew" ]; then
+            gradle wrapper --gradle-version 8.10  # Stable for AGP 8.5.2 & SDK 35
+            chmod +x gradlew
+          else
+            echo "Gradle wrapper already present"
+          fi
+          ./gradlew --version  # Verify
           echo "Gradle wrapper generated!"
+      - name: Set Android SDK location in local.properties  # New: Codemagic standard for Gradle to find SDK
+        script: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          echo "Local properties set with SDK path"
       - name: Build debug APK
         script: |
           export ANDROID_HOME=/usr/local/share/android-sdk
           export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home  # For Gradle if needed
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:/opt/homebrew/bin:$PATH
+          cd $CM_BUILD_DIR
           ./gradlew clean assembleDebug  # Clean build
     artifacts:
-      - app/build/outputs/apk/debug/app-debug.apk
+      - app/build/outputs/apk/debug/*.apk  # Updated: Specific to debug APK
