@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.graphics.Matrix
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.Image
@@ -16,6 +17,7 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
+import android.view.Surface
 import android.view.WindowManager
 import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
@@ -40,6 +42,7 @@ class ScreenshotCapturer(
     private var width = 0
     private var height = 0
     private var density = 0
+    private var currentRotation = 0  // Added: Current display rotation
 
     @Volatile
     private var capturing = false
@@ -77,9 +80,13 @@ class ScreenshotCapturer(
             height = metrics.heightPixels
             density = metrics.densityDpi
 
+            // Added: Get current rotation for landscape support
+            currentRotation = display.rotation
+            Log.d(TAG, "Current rotation: $currentRotation")
+
             Log.d(TAG, "Display size: $width x $height, density: $density")
 
-            val pixelFormat = PixelFormat.RGBA_8888  // Fixed: Universal format for Samsung Android 15
+            val pixelFormat = PixelFormat.RGBA_8888
             imageReader = ImageReader.newInstance(width, height, pixelFormat, 2)
             Log.d(TAG, "ImageReader created with format: $pixelFormat")
 
@@ -87,7 +94,6 @@ class ScreenshotCapturer(
             handler = Handler(handlerThread!!.looper)
             Log.d(TAG, "Handler thread started")
 
-            // Register callback before creating VirtualDisplay (mandatory for Android 14+)
             val callbackHandler = Handler(Looper.getMainLooper())
             mediaProjection?.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
@@ -98,7 +104,7 @@ class ScreenshotCapturer(
             Log.d(TAG, "MediaProjection callback registered")
 
             val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
-            Log.d(TAG, "Creating VirtualDisplay with flags: $flags (Android ${Build.VERSION.SDK_INT})")
+            Log.d(TAG, "Creating VirtualDisplay with flags: $flags (Rotation: $currentRotation)")
 
             virtualDisplay = try {
                 mediaProjection?.createVirtualDisplay(
@@ -190,7 +196,7 @@ class ScreenshotCapturer(
 
             buffer.rewind()
 
-            val config = Bitmap.Config.ARGB_8888  // Fixed: Match pixelFormat
+            val config = Bitmap.Config.ARGB_8888
             val bmp = try {
                 Bitmap.createBitmap(bmpW, bmpH, config)
             } catch (e: Exception) {
@@ -210,14 +216,28 @@ class ScreenshotCapturer(
                 try { img.close() } catch (_: Throwable) {}
             }
 
-            val finalBitmap = if (bmp.width != width || bmp.height != height) {
+            // Added: Rotate bitmap based on current rotation for landscape support
+            var finalBitmap = bmp
+            if (currentRotation != Surface.ROTATION_0) {
+                val matrix = Matrix()
+                when (currentRotation) {
+                    Surface.ROTATION_90 -> matrix.postRotate(90f)
+                    Surface.ROTATION_180 -> matrix.postRotate(180f)
+                    Surface.ROTATION_270 -> matrix.postRotate(270f)
+                }
+                finalBitmap = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                bmp.recycle()  // Old bitmap recycle
+                Log.d(TAG, "Bitmap rotated for landscape (rotation: $currentRotation)")
+            }
+
+            if (bmp.width != width || bmp.height != height) {
                 try {
                     Bitmap.createBitmap(bmp, 0, 0, width.coerceAtMost(bmp.width), height.coerceAtMost(bmp.height))
                 } catch (e: Exception) {
                     Log.e(TAG, "cropping failed", e)
                     bmp
                 }
-            } else bmp
+            }
 
             onBitmapReady?.let { cb ->
                 try {
