@@ -79,11 +79,7 @@ class ScreenshotCapturer(
 
             Log.d(TAG, "Display size: $width x $height, density: $density")
 
-            val pixelFormat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                PixelFormat.RGB_565
-            } else {
-                PixelFormat.RGBA_8888
-            }
+            val pixelFormat = PixelFormat.RGBA_8888  // Fixed: Universal format for Samsung Android 15
             imageReader = ImageReader.newInstance(width, height, pixelFormat, 2)
             Log.d(TAG, "ImageReader created with format: $pixelFormat")
 
@@ -91,7 +87,7 @@ class ScreenshotCapturer(
             handler = Handler(handlerThread!!.looper)
             Log.d(TAG, "Handler thread started")
 
-            // Fixed: Register callback before creating VirtualDisplay (mandatory for Android 14+)
+            // Register callback before creating VirtualDisplay (mandatory for Android 14+)
             val callbackHandler = Handler(Looper.getMainLooper())
             mediaProjection?.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
@@ -125,7 +121,7 @@ class ScreenshotCapturer(
                 Log.e(TAG, "createVirtualDisplay failed (illegal state)", e)
                 null
             } catch (e: SecurityException) {
-                Log.e(TAG, "createVirtualDisplay failed (security – check permission type)", e)
+                Log.e(TAG, "createVirtualDisplay failed (security – check 'Entire screen' permission)", e)
                 null
             } catch (e: Exception) {
                 Log.e(TAG, "createVirtualDisplay failed", e)
@@ -194,7 +190,7 @@ class ScreenshotCapturer(
 
             buffer.rewind()
 
-            val config = if (plane.pixelStride == 2) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
+            val config = Bitmap.Config.ARGB_8888  // Fixed: Match pixelFormat
             val bmp = try {
                 Bitmap.createBitmap(bmpW, bmpH, config)
             } catch (e: Exception) {
