@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -23,6 +24,7 @@ class MainActivity : AppCompatActivity() {
 
     private var resultCode: Int = 0
     private var resultData: Intent? = null
+    private var webSocketClient: WebSocketClient? = null  // New: WS Client instance
 
     private val requestProjection =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -54,6 +56,11 @@ class MainActivity : AppCompatActivity() {
         stopBtn = findViewById(R.id.stopBtn)
         statusTv = findViewById(R.id.status)
 
+        // Default values
+        intervalInput.setText("3")
+        uploadUrlInput.setText("https://practice-ppaz.onrender.com/upload")
+        wsUrlInput.setText("wss://practice-ppaz.onrender.com/ws-audio")
+
         startBtn.setOnClickListener {
             val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             val intent = mpm.createScreenCaptureIntent()
@@ -61,10 +68,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         stopBtn.setOnClickListener {
-            val stopIntent = Intent(this, CaptureService::class.java)
-            stopIntent.action = CaptureService.ACTION_STOP
-            startService(stopIntent)
-            statusTv.text = "🛑 Stopped"
+            stopCaptureService()
         }
     }
 
@@ -87,6 +91,22 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // Start WS Client (connects on service start)
+        webSocketClient = WebSocketClient(
+            wsUrl = wsUrl,
+            onAudioUrl = { audioUrl ->
+                // Trigger ExoPlayer
+                ExoPlayerManager.play(this, audioUrl)
+                Log.i("MainActivity", "Playing audio: $audioUrl")
+            },
+            onStatusChange = { status ->
+                runOnUiThread {
+                    statusTv.text = "WS: $status"
+                }
+            }
+        )
+        webSocketClient?.connect()
+
         val svc = Intent(this, CaptureService::class.java).apply {
             action = CaptureService.ACTION_START
             putExtra(CaptureService.EXTRA_INTERVAL, interval)
@@ -99,6 +119,19 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc)
         else startService(svc)
 
-        statusTv.text = "▶️ Running every ${interval}s"
+        statusTv.text = "▶️ Running every ${interval}s | WS: Connecting..."
+    }
+
+    private fun stopCaptureService() {
+        val stopIntent = Intent(this, CaptureService::class.java)
+        stopIntent.action = CaptureService.ACTION_STOP
+        startService(stopIntent)
+        webSocketClient?.close()
+        statusTv.text = "🛑 Stopped"
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        webSocketClient?.close()
     }
 }
