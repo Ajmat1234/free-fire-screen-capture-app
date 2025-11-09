@@ -13,7 +13,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
-import android.os.Looper  // Added: For callback handler
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
@@ -51,12 +51,6 @@ class ScreenshotCapturer(
                 mediaProjection = mpm?.getMediaProjection(resultCode, resultData)
                 if (mediaProjection != null) {
                     Log.d(TAG, "MediaProjection created successfully")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        if (!mediaProjection!!.isValid) {
-                            Log.e(TAG, "MediaProjection is not valid - stopping")
-                            return
-                        }
-                    }
                     prepare()
                 } else {
                     Log.e(TAG, "MediaProjection is null in init")
