@@ -1,18 +1,15 @@
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-        gradlePluginPortal()
-    }
-    dependencies {
-        classpath "com.android.tools.build:gradle:8.5.2"  // Updated for SDK 34 full support
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25"
-    }
-}
+android {
+    namespace = "com.ajmat.screencap"
+    compileSdk = 35  // Changed: 34 -> 35
 
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
+    buildToolsVersion "35.0.0"  // Changed: 34.0.0 -> 35.0.0
+
+    defaultConfig {
+        applicationId = "com.ajmat.screencap"
+        minSdk = 23
+        targetSdk = 35  // Changed: 34 -> 35
+        versionCode = 1
+        versionName = "1.0"
     }
+    // Rest same
 }
