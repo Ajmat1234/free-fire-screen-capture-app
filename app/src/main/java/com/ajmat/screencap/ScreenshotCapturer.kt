@@ -2,13 +2,17 @@ package com.ajmat.screencap
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.*
-import android.hardware.display.*
+import android.graphics.Bitmap
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
 import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
-import android.os.*
+import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
@@ -19,8 +23,14 @@ import kotlin.math.max
 class ScreenshotCapturer(
     private val context: Context,
     private val resultCode: Int,
-    private val resultData: Intent?
+    private val resultData: Intent?,
+    private val onBitmapReady: ((Bitmap) -> Unit)? = null
 ) {
+
+    companion object {
+        private const val TAG = "ScreenshotCapturer"
+    }
+
     private var mediaProjection: MediaProjection? = null
     private var imageReader: ImageReader? = null
     private var virtualDisplay: VirtualDisplay? = null
@@ -30,59 +40,257 @@ class ScreenshotCapturer(
     private var height = 0
     private var density = 0
 
-    init { prepare() }
+    @Volatile
+    private var capturing = false
+
+    init {
+        try {
+            if (resultData != null && resultCode != 0) {
+                val mpm = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+                mediaProjection = mpm?.getMediaProjection(resultCode, resultData)
+                if (mediaProjection != null) {
+                    Log.d(TAG, "MediaProjection created successfully")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        if (!mediaProjection!!.isValid) {
+                            Log.e(TAG, "MediaProjection is not valid - stopping")
+                            return
+                        }
+                    }
+                    prepare()
+                } else {
+                    Log.e(TAG, "MediaProjection is null in init")
+                }
+            } else {
+                Log.w(TAG, "ScreenshotCapturer created without valid projection data.")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "init failed", e)
+        }
+    }
 
     private fun prepare() {
         try {
-            val mpm = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            mediaProjection = mpm.getMediaProjection(resultCode, resultData!!)
+            Log.d(TAG, "prepare() called")
+            val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            val display = wm?.defaultDisplay ?: run {
+                Log.e(TAG, "No default display")
+                return
+            }
             val metrics = DisplayMetrics()
-            val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            wm.defaultDisplay.getRealMetrics(metrics)
+            display.getRealMetrics(metrics)
             width = metrics.widthPixels
             height = metrics.heightPixels
             density = metrics.densityDpi
-            imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-            handlerThread = HandlerThread("ScreenCap").apply { start() }
+
+            Log.d(TAG, "Display size: $width x $height, density: $density")
+
+            val pixelFormat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                PixelFormat.RGB_565
+            } else {
+                PixelFormat.RGBA_8888
+            }
+            imageReader = ImageReader.newInstance(width, height, pixelFormat, 2)
+            Log.d(TAG, "ImageReader created with format: $pixelFormat")
+
+            handlerThread = HandlerThread("ScreenCapture").apply { start() }
             handler = Handler(handlerThread!!.looper)
-            virtualDisplay = mediaProjection?.createVirtualDisplay(
-                "screencap", width, height, density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader?.surface, null, handler
-            )
+            Log.d(TAG, "Handler thread started")
+
+            // Fixed for Android 15: Add SECURE | TRUNCATE for strict security, fallback to basic
+            var flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or DisplayManager.VIRTUAL_DISPLAY_FLAG_TRUNCATE
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                flags = flags or DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE
+            }
+            Log.d(TAG, "Creating VirtualDisplay with flags: $flags (Android ${Build.VERSION.SDK_INT})")
+
+            virtualDisplay = try {
+                mediaProjection?.createVirtualDisplay(
+                    "screencap",
+                    width,
+                    height,
+                    density,
+                    flags,
+                    imageReader?.surface,
+                    null,
+                    handler
+                ).also {
+                    if (it != null) {
+                        Log.i(TAG, "VirtualDisplay created successfully with flags $flags")
+                    } else {
+                        Log.e(TAG, "createVirtualDisplay returned null")
+                    }
+                }
+            } catch (e: IllegalStateException) {
+                Log.e(TAG, "createVirtualDisplay failed (illegal state)", e)
+                // Fallback: Basic flags with delay
+                try {
+                    TimeUnit.MILLISECONDS.sleep(1000)  // 1s delay for device lag
+                    val fallbackFlags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
+                    virtualDisplay = mediaProjection?.createVirtualDisplay(
+                        "screencap_fallback",
+                        width,
+                        height,
+                        density,
+                        fallbackFlags,
+                        imageReader?.surface,
+                        null,
+                        handler
+                    )
+                    Log.d(TAG, "Fallback VirtualDisplay with flags: $fallbackFlags")
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Fallback createVirtualDisplay failed", e2)
+                    null
+                }
+            } catch (e: SecurityException) {
+                Log.e(TAG, "createVirtualDisplay failed (security - check 'Entire screen' permission)", e)
+                null
+            } catch (e: Exception) {
+                Log.e(TAG, "createVirtualDisplay failed", e)
+                null
+            }
+
+            if (virtualDisplay == null) {
+                Log.e(TAG, "virtualDisplay is null after create - stopping")
+                stop()
+            } else {
+                Log.i(TAG, "Virtual display created successfully with flags")
+            }
         } catch (e: Exception) {
-            Log.e("ScreenshotCapturer", "prepare failed", e)
+            Log.e(TAG, "prepare failed", e)
+            stop()
         }
     }
 
     fun captureOnce(): Bitmap? {
-        var img: Image? = null
+        if (capturing) {
+            Log.w(TAG, "captureOnce already running")
+            return null
+        }
+        capturing = true
         try {
-            img = imageReader?.acquireLatestImage()
-            if (img == null) {
-                TimeUnit.MILLISECONDS.sleep(100)
-                img = imageReader?.acquireLatestImage()
+            val reader = imageReader ?: run {
+                Log.w(TAG, "captureOnce: imageReader is null")
+                return null
             }
-            val plane = img?.planes?.firstOrNull() ?: return null
+
+            var img: Image? = reader.acquireLatestImage()
+            if (img == null) {
+                Log.d(TAG, "First acquireLatestImage returned null - retrying...")
+                TimeUnit.MILLISECONDS.sleep(500)  // Increased for real device
+                img = reader.acquireLatestImage()
+                if (img == null) {
+                    TimeUnit.MILLISECONDS.sleep(300)
+                    img = reader.acquireLatestImage()
+                }
+                if (img == null) {
+                    TimeUnit.MILLISECONDS.sleep(200)
+                    img = reader.acquireLatestImage()
+                }
+            }
+            if (img == null) {
+                Log.w(TAG, "No image available after retries")
+                return null
+            }
+
+            val plane = img.planes.firstOrNull()
+            if (plane == null) {
+                img.close()
+                Log.w(TAG, "captureOnce: image has no planes")
+                return null
+            }
+
             val buffer: ByteBuffer = plane.buffer
             val pixelStride = plane.pixelStride
             val rowStride = plane.rowStride
-            val bmpW = rowStride / pixelStride
-            val bmp = Bitmap.createBitmap(bmpW, height, Bitmap.Config.ARGB_8888)
-            bmp.copyPixelsFromBuffer(buffer)
-            return Bitmap.createBitmap(bmp, 0, 0, width, height)
+            if (pixelStride == 0) {
+                img.close()
+                Log.w(TAG, "captureOnce: pixelStride == 0")
+                return null
+            }
+
+            val bitmapWidth = rowStride / pixelStride
+            val bitmapHeight = height
+            val bmpW = max(1, bitmapWidth)
+            val bmpH = max(1, bitmapHeight)
+
+            buffer.rewind()
+
+            val config = if (plane.pixelStride == 2) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
+            val bmp = try {
+                Bitmap.createBitmap(bmpW, bmpH, config)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create bitmap", e)
+                img.close()
+                return null
+            }
+
+            try {
+                bmp.copyPixelsFromBuffer(buffer)
+            } catch (e: Exception) {
+                Log.e(TAG, "copyPixelsFromBuffer failed", e)
+                img.close()
+                bmp.recycle()
+                return null
+            } finally {
+                try { img.close() } catch (_: Throwable) {}
+            }
+
+            val finalBitmap = if (bmp.width != width || bmp.height != height) {
+                try {
+                    Bitmap.createBitmap(bmp, 0, 0, width.coerceAtMost(bmp.width), height.coerceAtMost(bmp.height))
+                } catch (e: Exception) {
+                    Log.e(TAG, "cropping failed", e)
+                    bmp
+                }
+            } else bmp
+
+            onBitmapReady?.let { cb ->
+                try {
+                    cb(finalBitmap)
+                } catch (e: Exception) {
+                    Log.e(TAG, "onBitmapReady callback failed", e)
+                }
+            }
+
+            return finalBitmap
         } catch (e: Exception) {
-            Log.e("ScreenshotCapturer", "capture failed", e)
+            Log.e(TAG, "captureOnce failed", e)
+            return null
         } finally {
-            try { img?.close() } catch (_: Throwable) {}
+            capturing = false
         }
-        return null
     }
 
     fun stop() {
-        try { virtualDisplay?.release() } catch (_: Throwable) {}
-        try { imageReader?.close() } catch (_: Throwable) {}
-        try { mediaProjection?.stop() } catch (_: Throwable) {}
-        try { handlerThread?.quitSafely() } catch (_: Throwable) {}
+        try {
+            virtualDisplay?.release()
+        } catch (e: Throwable) {
+            Log.w(TAG, "virtualDisplay release failed", e)
+        }
+        virtualDisplay = null
+
+        try {
+            imageReader?.close()
+        } catch (e: Throwable) {
+            Log.w(TAG, "imageReader close failed", e)
+        }
+        imageReader = null
+
+        try {
+            mediaProjection?.stop()
+        } catch (e: Throwable) {
+            Log.w(TAG, "mediaProjection stop failed", e)
+        }
+        mediaProjection = null
+
+        try {
+            handlerThread?.quitSafely()
+            handlerThread?.join(200)
+        } catch (e: Throwable) {
+            Log.w(TAG, "handlerThread stop failed", e)
+        } finally {
+            handlerThread = null
+            handler = null
+        }
     }
 }
