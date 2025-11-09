@@ -1,16 +1,13 @@
 package com.ajmat.screencap
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.Manifest
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -27,38 +24,28 @@ class MainActivity : AppCompatActivity() {
     private var resultCode: Int = 0
     private var resultData: Intent? = null
 
-    private val requestProjection = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == RESULT_OK) {
-            resultCode = result.resultCode
-            resultData = result.data
-            statusTv.text = "Status: Permission granted"
-            // Check notification permission after screen permission
-            checkAndRequestNotificationPermission()
-        } else {
-            Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
-            statusTv.text = "Status: permission denied"
+    private val requestProjection =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK && result.data != null) {
+                resultCode = result.resultCode
+                resultData = result.data
+                statusTv.text = "✅ Screen capture permission granted"
+                checkAndRequestNotificationPermission()
+            } else {
+                Toast.makeText(this, "❌ Permission denied", Toast.LENGTH_SHORT).show()
+                statusTv.text = "Status: Permission denied"
+            }
         }
-    }
 
-    // New: Notification permission launcher
-    private val requestNotificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-        if (isGranted) {
-            Toast.makeText(this, "Notification permission granted. Starting service...", Toast.LENGTH_SHORT).show()
-            startCaptureService()
-        } else {
-            Toast.makeText(this, "Notification permission denied. Foreground service needs it for notifications.", Toast.LENGTH_LONG).show()
-            statusTv.text = "Status: notification permission denied"
+    private val requestNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) startCaptureService()
+            else Toast.makeText(this, "Notification permission required!", Toast.LENGTH_LONG).show()
         }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
-        if (savedInstanceState != null) {
-            resultCode = savedInstanceState.getInt("resultCode", 0)
-            resultData = savedInstanceState.getParcelable("resultData")
-        }
 
         intervalInput = findViewById(R.id.intervalInput)
         uploadUrlInput = findViewById(R.id.uploadUrlInput)
@@ -68,61 +55,35 @@ class MainActivity : AppCompatActivity() {
         statusTv = findViewById(R.id.status)
 
         startBtn.setOnClickListener {
-            val interval = intervalInput.text.toString().toIntOrNull() ?: 1
-            if (interval < 1 || interval > 10) {
-                Toast.makeText(this, "Enter 1-10 seconds", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val uploadUrl = uploadUrlInput.text.toString().trim()
-            val wsUrl = wsUrlInput.text.toString().trim()
-            if (uploadUrl.isEmpty()) {  // Made wsUrl optional as per your use case
-                Toast.makeText(this, "Provide upload URL (WebSocket optional)", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
-            if (resultData == null) {
-                val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                val intent = mpm.createScreenCaptureIntent()
-                requestProjection.launch(intent)
-            } else {
-                checkAndRequestNotificationPermission()
-            }
+            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            val intent = mpm.createScreenCaptureIntent()
+            requestProjection.launch(intent)
         }
 
         stopBtn.setOnClickListener {
             val stopIntent = Intent(this, CaptureService::class.java)
             stopIntent.action = CaptureService.ACTION_STOP
             startService(stopIntent)
-            statusTv.text = "Status: stopped"
+            statusTv.text = "🛑 Stopped"
         }
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putInt("resultCode", resultCode)
-        outState.putParcelable("resultData", resultData)
-    }
-
-    // New: Check and request notification permission
     private fun checkAndRequestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {  // Android 13+
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
-                startCaptureService()
-            } else {
-                requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        } else {
-            startCaptureService()
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else startCaptureService()
     }
 
     private fun startCaptureService() {
-        val interval = intervalInput.text.toString().toIntOrNull() ?: 1
+        val interval = intervalInput.text.toString().toIntOrNull() ?: 3
         val uploadUrl = uploadUrlInput.text.toString().trim()
         val wsUrl = wsUrlInput.text.toString().trim()
 
         if (resultData == null || resultCode == 0) {
-            Toast.makeText(this, "Please grant screen capture permission first", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Grant screen capture permission first", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -135,12 +96,9 @@ class MainActivity : AppCompatActivity() {
             putExtra(CaptureService.EXTRA_RESULT_INTENT, resultData)
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(svc)
-        } else {
-            startService(svc)
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc)
+        else startService(svc)
 
-        statusTv.text = "Status: started (interval ${interval}s)"
+        statusTv.text = "▶️ Running every ${interval}s"
     }
 }
