@@ -4,7 +4,7 @@ workflows:
     instance_type: mac_mini_m2
     environment:
       vars:
-        GRADLE_OPTS: "-Xmx1024m"
+        GRADLE_OPTS: "-Xmx2048m"  # Increased: 1024m -> 2048m for M2 memory
         ANDROID_HOME: /usr/local/share/android-sdk
     scripts:
       - name: Manual Install Latest Command-Line Tools (v13.0)  # Clean install
@@ -31,34 +31,73 @@ workflows:
           yes | sdkmanager --licenses
           $ANDROID_HOME/build-tools/35.0.0/aapt2 version  # Verify
           echo "SDK 35 installed with proper tools!"
-      - name: Install/Update Gradle via Homebrew  # New: Ensure Gradle available for wrapper generation
+      - name: Install/Update Gradle via Homebrew  # Updated: Explicit ARM64 path for M2
         script: |
-          brew install gradle
-          export PATH=/opt/homebrew/bin:$PATH  # For M2 macOS
-          gradle --version
-          echo "Gradle installed/updated successfully"
-      - name: Generate Gradle wrapper  # Updated: Specify version for AGP 8.5 compatibility
+          # For M2 ARM64, use specific brew path
+          export HOMEBREW_PREFIX="/opt/homebrew"
+          export PATH="$HOMEBREW_PREFIX/bin:$PATH"
+          brew update
+          brew install gradle || brew upgrade gradle
+          gradle --version || echo "Gradle install failed - checking path"
+          which gradle || echo "Gradle not in PATH: $PATH"
+          echo "Gradle installed/updated successfully. Version: $(gradle --version | head -n1)"
+      - name: Generate Gradle wrapper  # Updated: Verbose logs, fallback manual download, app dir try
         script: |
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:/opt/homebrew/bin:$PATH
-          cd $CM_BUILD_DIR  # Ensure in project root
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$HOMEBREW_PREFIX/bin:$PATH"
+          cd $CM_BUILD_DIR  # Project root
+          pwd
+          ls -la  # Log current dir contents
           if [ ! -f "gradlew" ]; then
-            gradle wrapper --gradle-version 8.10  # Stable for AGP 8.5.2 & SDK 35
+            echo "Generating wrapper in root..."
+            gradle wrapper --gradle-version 8.8 || {  # Changed: 8.10 -> 8.8 (stable, faster)
+              echo "Root generation failed, trying in app module..."
+              cd app
+              gradle wrapper --gradle-version 8.8
+              cd ..
+            }
+            # Manual fallback: Download if still fail (rare)
+            if [ ! -f "gradlew" ]; then
+              echo "Manual download fallback..."
+              mkdir -p gradle/wrapper
+              curl -o gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/releases/download/v8.8/gradle-8.8-bin.zip --silent
+              # Simplified - full manual zip extract if needed, but try simple
+              wget -q https://services.gradle.org/distributions/gradle-8.8-bin.zip
+              unzip -q gradle-8.8-bin.zip
+              mv gradle-8.8/gradle/wrapper/* gradle/wrapper/ || true
+              chmod +x gradlew
+            fi
             chmod +x gradlew
+            echo "Wrapper files: $(ls -la gradlew gradle/wrapper/ 2>/dev/null || echo 'Missing')"
           else
             echo "Gradle wrapper already present"
           fi
-          ./gradlew --version  # Verify
-          echo "Gradle wrapper generated!"
-      - name: Set Android SDK location in local.properties  # New: Codemagic standard for Gradle to find SDK
+          if [ -f "./gradlew" ]; then
+            ./gradlew --version || echo "Wrapper version check failed"
+            echo "Gradle wrapper generated successfully!"
+          else
+            echo "ERROR: gradlew still not created - build will fail"
+            exit 1  # Fail early
+          fi
+      - name: Set Android SDK location in local.properties  # New: Also set in app dir if needed
         script: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
+          # Fallback for submodules
+          echo "sdk.dir=$ANDROID_HOME" > app/local.properties 2>/dev/null || true
+          cat local.properties
           echo "Local properties set with SDK path"
-      - name: Build debug APK
+      - name: Build debug APK  # Updated: Check gradlew exists before run
         script: |
           export ANDROID_HOME=/usr/local/share/android-sdk
-          export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home  # For Gradle if needed
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:/opt/homebrew/bin:$PATH
+          export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$HOMEBREW_PREFIX/bin:$PATH"
           cd $CM_BUILD_DIR
-          ./gradlew clean assembleDebug  # Clean build
+          if [ ! -f "./gradlew" ]; then
+            echo "ERROR: gradlew missing - cannot build"
+            ls -la  # Debug
+            exit 1
+          fi
+          echo "Running build with Gradle $(./gradlew --version | head -n1)"
+          ./gradlew clean assembleDebug --stacktrace --info  # Added: --stacktrace --info for better logs on fail
     artifacts:
-      - app/build/outputs/apk/debug/*.apk  # Updated: Specific to debug APK
+      - app/build/outputs/apk/debug/*.apk  # Specific to debug APK
+      - build/outputs/apk/debug/*.apk  # Fallback if in root
