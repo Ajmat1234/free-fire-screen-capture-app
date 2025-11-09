@@ -4,13 +4,13 @@ workflows:
     instance_type: mac_mini_m2
     environment:
       vars:
-        GRADLE_OPTS: "-Xmx2048m"  # Increased: 1024m -> 2048m for M2 memory
+        GRADLE_OPTS: "-Xmx2048m"
         ANDROID_HOME: /usr/local/share/android-sdk
     scripts:
-      - name: Manual Install Latest Command-Line Tools (v13.0)  # Clean install
+      - name: Manual Install Latest Command-Line Tools (v13.0)
         script: |
           export ANDROID_HOME=/usr/local/share/android-sdk
-          export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home  # Key: Zulu 8 for sdkmanager
+          export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home
           rm -rf $ANDROID_HOME/cmdline-tools/latest
           mkdir -p $ANDROID_HOME/cmdline-tools
           cd $ANDROID_HOME/cmdline-tools
@@ -21,19 +21,18 @@ workflows:
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
           echo "Latest cmdline-tools installed. PATH: $PATH"
-      - name: Install Android SDK 35 & Build Tools + Platform Tools  # Updated for SDK 35
+      - name: Install Android SDK 35 & Build Tools + Platform Tools
         script: |
           export ANDROID_HOME=/usr/local/share/android-sdk
-          export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home  # Key: For proper installation
+          export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           sdkmanager --uninstall "build-tools;33.0.1" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools" || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
           yes | sdkmanager --licenses
-          $ANDROID_HOME/build-tools/35.0.0/aapt2 version  # Verify
+          $ANDROID_HOME/build-tools/35.0.0/aapt2 version
           echo "SDK 35 installed with proper tools!"
-      - name: Install/Update Gradle via Homebrew  # Updated: Explicit ARM64 path for M2
+      - name: Install/Update Gradle via Homebrew
         script: |
-          # For M2 ARM64, use specific brew path
           export HOMEBREW_PREFIX="/opt/homebrew"
           export PATH="$HOMEBREW_PREFIX/bin:$PATH"
           brew update
@@ -41,30 +40,39 @@ workflows:
           gradle --version || echo "Gradle install failed - checking path"
           which gradle || echo "Gradle not in PATH: $PATH"
           echo "Gradle installed/updated successfully. Version: $(gradle --version | head -n1)"
-      - name: Generate Gradle wrapper  # Updated: Verbose logs, fallback manual download, app dir try
+      - name: Generate Gradle wrapper
         script: |
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$HOMEBREW_PREFIX/bin:$PATH"
-          cd $CM_BUILD_DIR  # Project root
+          cd $CM_BUILD_DIR
           pwd
-          ls -la  # Log current dir contents
+          ls -la
           if [ ! -f "gradlew" ]; then
             echo "Generating wrapper in root..."
-            gradle wrapper --gradle-version 8.8 || {  # Changed: 8.10 -> 8.8 (stable, faster)
+            gradle wrapper --gradle-version 8.8 || {
               echo "Root generation failed, trying in app module..."
               cd app
               gradle wrapper --gradle-version 8.8
               cd ..
             }
-            # Manual fallback: Download if still fail (rare)
             if [ ! -f "gradlew" ]; then
               echo "Manual download fallback..."
               mkdir -p gradle/wrapper
-              curl -o gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/releases/download/v8.8/gradle-8.8-bin.zip --silent
-              # Simplified - full manual zip extract if needed, but try simple
               wget -q https://services.gradle.org/distributions/gradle-8.8-bin.zip
               unzip -q gradle-8.8-bin.zip
-              mv gradle-8.8/gradle/wrapper/* gradle/wrapper/ || true
-              chmod +x gradlew
+              cp gradle-8.8/gradle/wrapper/gradle-wrapper.jar gradle/wrapper/ || true
+              cp gradle-8.8/gradlew .
+              cp gradle-8.8/gradlew.bat .
+              chmod +x gradlew gradlew.bat
+              if [ ! -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+                cat > gradle/wrapper/gradle-wrapper.properties << EOF
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+zipStoreBase=GRADLE_USER_HOME
+distributionUrl=https\\://services.gradle.org/distributions/gradle-8.8-bin.zip
+EOF
+              fi
+              rm -rf gradle-8.8 gradle-8.8-bin.zip
+              echo "Manual wrapper setup complete"
             fi
             chmod +x gradlew
             echo "Wrapper files: $(ls -la gradlew gradle/wrapper/ 2>/dev/null || echo 'Missing')"
@@ -76,16 +84,15 @@ workflows:
             echo "Gradle wrapper generated successfully!"
           else
             echo "ERROR: gradlew still not created - build will fail"
-            exit 1  # Fail early
+            exit 1
           fi
-      - name: Set Android SDK location in local.properties  # New: Also set in app dir if needed
+      - name: Set Android SDK location in local.properties
         script: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          # Fallback for submodules
           echo "sdk.dir=$ANDROID_HOME" > app/local.properties 2>/dev/null || true
           cat local.properties
           echo "Local properties set with SDK path"
-      - name: Build debug APK  # Updated: Check gradlew exists before run
+      - name: Build debug APK
         script: |
           export ANDROID_HOME=/usr/local/share/android-sdk
           export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home
@@ -93,11 +100,11 @@ workflows:
           cd $CM_BUILD_DIR
           if [ ! -f "./gradlew" ]; then
             echo "ERROR: gradlew missing - cannot build"
-            ls -la  # Debug
+            ls -la
             exit 1
           fi
           echo "Running build with Gradle $(./gradlew --version | head -n1)"
-          ./gradlew clean assembleDebug --stacktrace --info  # Added: --stacktrace --info for better logs on fail
+          ./gradlew clean assembleDebug --stacktrace --info
     artifacts:
-      - app/build/outputs/apk/debug/*.apk  # Specific to debug APK
-      - build/outputs/apk/debug/*.apk  # Fallback if in root
+      - app/build/outputs/apk/debug/*.apk
+      - build/outputs/apk/debug/*.apk
