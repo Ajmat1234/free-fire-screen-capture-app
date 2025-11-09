@@ -18,6 +18,7 @@ import android.util.Log
 import android.view.WindowManager
 import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 
 class ScreenshotCapturer(
@@ -50,7 +51,6 @@ class ScreenshotCapturer(
                 mediaProjection = mpm?.getMediaProjection(resultCode, resultData)
                 if (mediaProjection != null) {
                     Log.d(TAG, "MediaProjection created successfully")
-                    // New: Check if projection is valid
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         if (!mediaProjection!!.isValid) {
                             Log.e(TAG, "MediaProjection is not valid - stopping")
@@ -85,9 +85,8 @@ class ScreenshotCapturer(
 
             Log.d(TAG, "Display size: $width x $height, density: $density")
 
-            // Changed: Use RGB_565 for Android 15 stability (lighter, less null issues)
             val pixelFormat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                PixelFormat.RGB_565  // Changed: RGBA_8888 -> RGB_565
+                PixelFormat.RGB_565
             } else {
                 PixelFormat.RGBA_8888
             }
@@ -98,8 +97,6 @@ class ScreenshotCapturer(
             handler = Handler(handlerThread!!.looper)
             Log.d(TAG, "Handler thread started")
 
-            // Changed: Always use AUTO_MIRROR | PUBLIC for full screen (remove OWN_CONTENT_ONLY - it blocks full capture)
-            // No retry needed - direct stable flags for Android 15
             val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
             Log.d(TAG, "Creating VirtualDisplay with flags: $flags (Android ${Build.VERSION.SDK_INT})")
 
@@ -143,11 +140,6 @@ class ScreenshotCapturer(
         }
     }
 
-    /**
-     * Capture a single frame synchronously.
-     * Returns a Bitmap or null.
-     * This method is defensive and will never throw — it logs errors.
-     */
     fun captureOnce(): Bitmap? {
         if (capturing) {
             Log.w(TAG, "captureOnce already running")
@@ -160,14 +152,13 @@ class ScreenshotCapturer(
                 return null
             }
 
-            // Extended retry for Android 15 lag
             var img: Image? = reader.acquireLatestImage()
             if (img == null) {
                 Log.d(TAG, "First acquireLatestImage returned null - retrying...")
-                Thread.sleep(200)  // Increased: 100 -> 200ms
+                TimeUnit.MILLISECONDS.sleep(200)
                 img = reader.acquireLatestImage()
                 if (img == null) {
-                    Thread.sleep(100)
+                    TimeUnit.MILLISECONDS.sleep(100)
                     img = reader.acquireLatestImage()
                 }
             }
@@ -199,7 +190,6 @@ class ScreenshotCapturer(
 
             buffer.rewind()
 
-            // Changed: Config match format (RGB_565 for efficiency)
             val config = if (plane.pixelStride == 2) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
             val bmp = try {
                 Bitmap.createBitmap(bmpW, bmpH, config)
@@ -229,7 +219,6 @@ class ScreenshotCapturer(
                 }
             } else bmp
 
-            // callback (don't block the caller)
             onBitmapReady?.let { cb ->
                 try {
                     cb(finalBitmap)
