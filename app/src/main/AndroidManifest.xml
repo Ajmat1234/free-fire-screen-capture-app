@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission
@@ -25,7 +24,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar">
 
-        <!-- Main launcher activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -35,7 +33,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Foreground service for screen capture -->
         <service
             android:name=".CaptureService"
             android:exported="false"
