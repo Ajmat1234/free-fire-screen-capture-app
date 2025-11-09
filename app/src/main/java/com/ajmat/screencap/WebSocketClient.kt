@@ -4,11 +4,10 @@ import android.util.Log
 import com.google.gson.Gson
 import kotlinx.coroutines.*
 import okhttp3.*
-import okhttp3.internal.ws.RealWebSocket  // For internal access if needed, but avoid
 import java.util.Map
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random  // For jitter
-import okhttp3.ByteString  // For sendPong
+import okhttp3.ByteString  // Added: For sendPong
 
 class WebSocketClient(
     private val wsUrl: String,
