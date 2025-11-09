@@ -41,7 +41,7 @@ workflows:
           gradle --version || echo "Gradle install failed - checking path"
           which gradle || echo "Gradle not in PATH: $PATH"
           echo "Gradle installed/updated successfully. Version: $(gradle --version | head -n1)"
-      - name: Generate Gradle wrapper  # Updated: Verbose logs, fallback manual download, app dir try
+      - name: Generate Gradle wrapper  # Updated: Correct manual fallback with proper extract & copy
         script: |
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$HOMEBREW_PREFIX/bin:$PATH"
           cd $CM_BUILD_DIR  # Project root
@@ -49,22 +49,35 @@ workflows:
           ls -la  # Log current dir contents
           if [ ! -f "gradlew" ]; then
             echo "Generating wrapper in root..."
-            gradle wrapper --gradle-version 8.8 || {  # Changed: 8.10 -> 8.8 (stable, faster)
+            gradle wrapper --gradle-version 8.8 || {  
               echo "Root generation failed, trying in app module..."
               cd app
               gradle wrapper --gradle-version 8.8
               cd ..
             }
-            # Manual fallback: Download if still fail (rare)
+            # Manual fallback: Correct download & full extract for gradle wrapper
             if [ ! -f "gradlew" ]; then
               echo "Manual download fallback..."
               mkdir -p gradle/wrapper
-              curl -o gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/releases/download/v8.8/gradle-8.8-bin.zip --silent
-              # Simplified - full manual zip extract if needed, but try simple
               wget -q https://services.gradle.org/distributions/gradle-8.8-bin.zip
               unzip -q gradle-8.8-bin.zip
-              mv gradle-8.8/gradle/wrapper/* gradle/wrapper/ || true
-              chmod +x gradlew
+              # Copy wrapper jar
+              cp gradle-8.8/gradle/wrapper/gradle-wrapper.jar gradle/wrapper/ || true
+              # Copy gradlew script
+              cp gradle-8.8/gradlew .
+              cp gradle-8.8/gradlew.bat .
+              chmod +x gradlew gradlew.bat
+              # Create gradle-wrapper.properties if missing
+              if [ ! -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+                cat > gradle/wrapper/gradle-wrapper.properties << EOF
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+zipStoreBase=GRADLE_USER_HOME
+distributionUrl=https\\://services.gradle.org/distributions/gradle-8.8-bin.zip
+EOF
+              fi
+              rm -rf gradle-8.8 gradle-8.8-bin.zip
+              echo "Manual wrapper setup complete"
             fi
             chmod +x gradlew
             echo "Wrapper files: $(ls -la gradlew gradle/wrapper/ 2>/dev/null || echo 'Missing')"
