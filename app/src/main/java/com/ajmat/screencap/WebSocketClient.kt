@@ -7,7 +7,6 @@ import okhttp3.*
 import java.util.Map
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random  // For jitter
-import okhttp3.ByteString  // Added: For sendPong
 
 class WebSocketClient(
     private val wsUrl: String,
@@ -22,15 +21,13 @@ class WebSocketClient(
 
     private var ws: WebSocket? = null
     private val client = OkHttpClient.Builder()
-        .pingInterval(PING_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS)  // Built-in ping support
+        .pingInterval(PING_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS)  // Built-in ping support - handles pings automatically
         .build()
     private val gson = Gson()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val reconnectAttempts = AtomicInteger(0)
     private var isClosedManually = false
-    private var pingJob: Job? = null
-    private var isConnected = false  // Manual health flag
 
     fun connect() {
         if (wsUrl.isBlank()) {
@@ -50,9 +47,8 @@ class WebSocketClient(
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     Log.i(TAG, "Connected successfully")
                     reconnectAttempts.set(0)
-                    isConnected = true
                     onStatusChange("Connected")  // UI update
-                    startPingScheduler()  // Start pings
+                    Log.d(TAG, "Auto-pings started (every 25s) to keep connection alive")
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -74,15 +70,12 @@ class WebSocketClient(
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     Log.e(TAG, "Connection failure: ${t.message}", t)
-                    isConnected = false
                     onStatusChange("Reconnecting... (Attempt ${reconnectAttempts.get() + 1})")
                     scheduleReconnect()
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     Log.i(TAG, "Connection closed: $code - $reason")
-                    isConnected = false
-                    stopPingScheduler()
                     if (!isClosedManually) {
                         onStatusChange("Disconnected - Reconnecting...")
                         scheduleReconnect()
@@ -96,28 +89,6 @@ class WebSocketClient(
             onStatusChange("Connection Error")
             scheduleReconnect()
         }
-    }
-
-    private fun startPingScheduler() {
-        stopPingScheduler()  // Cancel previous if any
-        pingJob = scope.launch {
-            while (isActive && isConnected) {  // Use manual flag
-                delay(PING_INTERVAL_MS)
-                try {
-                    ws?.sendPong(ByteString.EMPTY)  // Correct: ByteString.EMPTY
-                    Log.d(TAG, "Ping sent to keep Render alive")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Ping failed", e)
-                    isConnected = false
-                    break  // Trigger reconnect
-                }
-            }
-        }
-    }
-
-    private fun stopPingScheduler() {
-        pingJob?.cancel()
-        pingJob = null
     }
 
     private fun scheduleReconnect() {
@@ -144,8 +115,6 @@ class WebSocketClient(
 
     fun close() {
         isClosedManually = true
-        isConnected = false
-        stopPingScheduler()
         try {
             ws?.close(1000, "Manual close")
         } catch (e: Exception) {
