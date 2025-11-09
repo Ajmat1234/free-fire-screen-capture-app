@@ -40,7 +40,6 @@ class ScreenshotCapturer(
     private var height = 0
     private var density = 0
 
-    // simple lock so captureOnce isn't run concurrently
     @Volatile
     private var capturing = false
 
@@ -51,6 +50,13 @@ class ScreenshotCapturer(
                 mediaProjection = mpm?.getMediaProjection(resultCode, resultData)
                 if (mediaProjection != null) {
                     Log.d(TAG, "MediaProjection created successfully")
+                    // New: Check if projection is valid
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        if (!mediaProjection!!.isValid) {
+                            Log.e(TAG, "MediaProjection is not valid - stopping")
+                            return
+                        }
+                    }
                     prepare()
                 } else {
                     Log.e(TAG, "MediaProjection is null in init")
@@ -60,7 +66,6 @@ class ScreenshotCapturer(
             }
         } catch (e: Exception) {
             Log.e(TAG, "init failed", e)
-            // don't throw further — caller (service) should handle null capturer
         }
     }
 
@@ -80,22 +85,25 @@ class ScreenshotCapturer(
 
             Log.d(TAG, "Display size: $width x $height, density: $density")
 
-            // Use RGBA_8888 pixel format. Keep small buffer count.
-            imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-            Log.d(TAG, "ImageReader created")
+            // Changed: Use RGB_565 for Android 15 stability (lighter, less null issues)
+            val pixelFormat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                PixelFormat.RGB_565  // Changed: RGBA_8888 -> RGB_565
+            } else {
+                PixelFormat.RGBA_8888
+            }
+            imageReader = ImageReader.newInstance(width, height, pixelFormat, 2)
+            Log.d(TAG, "ImageReader created with format: $pixelFormat")
 
             handlerThread = HandlerThread("ScreenCapture").apply { start() }
             handler = Handler(handlerThread!!.looper)
             Log.d(TAG, "Handler thread started")
 
-            // Create virtual display - safe in try/catch with retry for Android 15
+            // Changed: Always use AUTO_MIRROR | PUBLIC for full screen (remove OWN_CONTENT_ONLY - it blocks full capture)
+            // No retry needed - direct stable flags for Android 15
+            val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
+            Log.d(TAG, "Creating VirtualDisplay with flags: $flags (Android ${Build.VERSION.SDK_INT})")
+
             virtualDisplay = try {
-                val flags = if (Build.VERSION.SDK_INT >= 35) {
-                    // Android 15 specific flags: OWN_CONTENT_ONLY and PUBLIC for stricter security
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
-                } else {
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
-                }
                 mediaProjection?.createVirtualDisplay(
                     "screencap",
                     width,
@@ -105,31 +113,19 @@ class ScreenshotCapturer(
                     imageReader?.surface,
                     null,
                     handler
-                )
+                ).also {
+                    if (it != null) {
+                        Log.i(TAG, "VirtualDisplay created successfully")
+                    } else {
+                        Log.e(TAG, "createVirtualDisplay returned null")
+                    }
+                }
             } catch (e: IllegalStateException) {
                 Log.e(TAG, "createVirtualDisplay failed (illegal state)", e)
-                // Retry once with different flag
-                try {
-                    TimeUnit.MILLISECONDS.sleep(100)
-                    val retryFlags = if (Build.VERSION.SDK_INT >= 35) {
-                        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
-                    } else {
-                        DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
-                    }
-                    mediaProjection?.createVirtualDisplay(
-                        "screencap_retry",
-                        width,
-                        height,
-                        density,
-                        retryFlags,
-                        imageReader?.surface,
-                        null,
-                        handler
-                    )
-                } catch (e2: Exception) {
-                    Log.e(TAG, "Retry createVirtualDisplay failed", e2)
-                    null
-                }
+                null
+            } catch (e: SecurityException) {
+                Log.e(TAG, "createVirtualDisplay failed (security - check permission type)", e)
+                null
             } catch (e: Exception) {
                 Log.e(TAG, "createVirtualDisplay failed", e)
                 null
@@ -137,14 +133,12 @@ class ScreenshotCapturer(
 
             if (virtualDisplay == null) {
                 Log.e(TAG, "virtualDisplay is null after create - stopping")
-                // cleanup prepared resources
                 stop()
             } else {
                 Log.i(TAG, "Virtual display created successfully with flags")
             }
         } catch (e: Exception) {
             Log.e(TAG, "prepare failed", e)
-            // cleanup on failure
             stop()
         }
     }
@@ -155,7 +149,6 @@ class ScreenshotCapturer(
      * This method is defensive and will never throw — it logs errors.
      */
     fun captureOnce(): Bitmap? {
-        // prevent concurrent captures which can confuse ImageReader
         if (capturing) {
             Log.w(TAG, "captureOnce already running")
             return null
@@ -167,19 +160,22 @@ class ScreenshotCapturer(
                 return null
             }
 
-            // Try acquire; sometimes first call returns null -> retry briefly with timeout
+            // Extended retry for Android 15 lag
             var img: Image? = reader.acquireLatestImage()
             if (img == null) {
                 Log.d(TAG, "First acquireLatestImage returned null - retrying...")
-                Thread.sleep(100) // small wait
+                Thread.sleep(200)  // Increased: 100 -> 200ms
                 img = reader.acquireLatestImage()
+                if (img == null) {
+                    Thread.sleep(100)
+                    img = reader.acquireLatestImage()
+                }
             }
             if (img == null) {
-                Log.w(TAG, "No image available after retry")
+                Log.w(TAG, "No image available after retries")
                 return null
             }
 
-            // Ensure image planes exist
             val plane = img.planes.firstOrNull()
             if (plane == null) {
                 img.close()
@@ -188,11 +184,9 @@ class ScreenshotCapturer(
             }
 
             val buffer: ByteBuffer = plane.buffer
-            // compute bitmap width using rowStride / pixelStride (safer)
             val pixelStride = plane.pixelStride
             val rowStride = plane.rowStride
             if (pixelStride == 0) {
-                // unexpected
                 img.close()
                 Log.w(TAG, "captureOnce: pixelStride == 0")
                 return null
@@ -200,17 +194,15 @@ class ScreenshotCapturer(
 
             val bitmapWidth = rowStride / pixelStride
             val bitmapHeight = height
-
-            // Defensive min size
             val bmpW = max(1, bitmapWidth)
             val bmpH = max(1, bitmapHeight)
 
-            // Rewind buffer before copying
             buffer.rewind()
 
-            // Create mutable bitmap and copy pixels
+            // Changed: Config match format (RGB_565 for efficiency)
+            val config = if (plane.pixelStride == 2) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
             val bmp = try {
-                Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                Bitmap.createBitmap(bmpW, bmpH, config)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to create bitmap", e)
                 img.close()
@@ -225,17 +217,15 @@ class ScreenshotCapturer(
                 bmp.recycle()
                 return null
             } finally {
-                // close image as soon as we've copied buffer
                 try { img.close() } catch (_: Throwable) {}
             }
 
-            // If the created bitmap is wider than actual screen, crop it
             val finalBitmap = if (bmp.width != width || bmp.height != height) {
                 try {
                     Bitmap.createBitmap(bmp, 0, 0, width.coerceAtMost(bmp.width), height.coerceAtMost(bmp.height))
                 } catch (e: Exception) {
                     Log.e(TAG, "cropping failed", e)
-                    bmp // fallback to original
+                    bmp
                 }
             } else bmp
 
