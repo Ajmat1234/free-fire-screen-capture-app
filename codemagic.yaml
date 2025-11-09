@@ -64,18 +64,16 @@ workflows:
               cp gradle-8.8/gradlew.bat .
               chmod +x gradlew gradlew.bat
               if [ ! -f "gradle/wrapper/gradle-wrapper.properties" ]; then
-                cat > gradle/wrapper/gradle-wrapper.properties << EOF
-  distributionBase=GRADLE_USER_HOME
-  distributionPath=wrapper/dists
-  zipStoreBase=GRADLE_USER_HOME
-  distributionUrl=https\\://services.gradle.org/distributions/gradle-8.8-bin.zip
-EOF
+                echo "distributionBase=GRADLE_USER_HOME" > gradle/wrapper/gradle-wrapper.properties
+                echo "distributionPath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
+                echo "zipStoreBase=GRADLE_USER_HOME" >> gradle/wrapper/gradle-wrapper.properties
+                echo "distributionUrl=https\\://services.gradle.org/distributions/gradle-8.8-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
               fi
               rm -rf gradle-8.8 gradle-8.8-bin.zip
               echo "Manual wrapper setup complete"
             fi
             chmod +x gradlew
-            echo "Wrapper files: \$(ls -la gradlew gradle/wrapper/ 2>/dev/null || echo 'Missing')"
+            echo "Wrapper files: $(ls -la gradlew gradle/wrapper/ 2>/dev/null || echo 'Missing')"
           else
             echo "Gradle wrapper already present"
           fi
@@ -103,7 +101,7 @@ EOF
             ls -la
             exit 1
           fi
-          echo "Running build with Gradle \$(./gradlew --version | head -n1)"
+          echo "Running build with Gradle $(./gradlew --version | head -n1)"
           ./gradlew clean assembleDebug --stacktrace --info
     artifacts:
       - app/build/outputs/apk/debug/*.apk
