@@ -174,6 +174,12 @@ class CaptureService : Service() {
         return START_STICKY
     }
 
+    // New: Handle Android 15 service timeout (6-hour limit)
+    override fun onTimeout(reason: Int, seqId: Int) {
+        Log.w(TAG, "Service timeout (Android 15 limit) - stopping gracefully")
+        stopSelf()
+    }
+
     private suspend fun uploadBitmap(uploadUrl: String, bitmap: Bitmap) {
         if (uploadUrl.isNotEmpty()) {
             try {
