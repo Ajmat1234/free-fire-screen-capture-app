@@ -4,6 +4,7 @@ import android.util.Log
 import com.google.gson.Gson
 import kotlinx.coroutines.*
 import okhttp3.*
+import java.util.Map  // Added: For gson.fromJson(Map::class.java)
 import java.util.concurrent.atomic.AtomicInteger
 
 class WebSocketClient(
