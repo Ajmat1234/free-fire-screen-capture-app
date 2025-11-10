@@ -5,8 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
@@ -91,6 +94,17 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // NEW: Request battery optimization ignore for stable background running
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            Toast.makeText(this, "For stable running, please allow ignoring battery optimizations (Settings will open)", Toast.LENGTH_LONG).show()
+            startActivity(intent)
+            return  // User grants, then they can retry start
+        }
+
         // Start Poller (replaces WS)
         audioPoller = AudioPoller(
             baseUrl = baseUrl,
@@ -119,7 +133,7 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc)
         else startService(svc)
 
-        statusTv.text = "▶️ Running every ${interval}s | Polling for audio..."
+        statusTv.text = "▶️ Running every ${interval}s | Polling for audio... (Battery opt ignored)"
     }
 
     private fun stopCaptureService() {
