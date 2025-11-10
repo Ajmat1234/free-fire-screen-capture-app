@@ -17,14 +17,14 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var intervalInput: EditText
     private lateinit var uploadUrlInput: EditText
-    private lateinit var wsUrlInput: EditText
+    private lateinit var wsUrlInput: EditText  // Now used as baseUrl for polling
     private lateinit var startBtn: Button
     private lateinit var stopBtn: Button
     private lateinit var statusTv: TextView
 
     private var resultCode: Int = 0
     private var resultData: Intent? = null
-    private var webSocketClient: WebSocketClient? = null  // New: WS Client instance
+    private var audioPoller: AudioPoller? = null  // Updated: Poller instead of WS
 
     private val requestProjection =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -59,7 +59,7 @@ class MainActivity : AppCompatActivity() {
         // Default values
         intervalInput.setText("3")
         uploadUrlInput.setText("https://practice-ppaz.onrender.com/upload")
-        wsUrlInput.setText("wss://practice-ppaz.onrender.com/ws-audio")
+        wsUrlInput.setText("https://practice-ppaz.onrender.com")  // Now baseUrl for polling
 
         startBtn.setOnClickListener {
             val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -84,16 +84,16 @@ class MainActivity : AppCompatActivity() {
     private fun startCaptureService() {
         val interval = intervalInput.text.toString().toIntOrNull() ?: 3
         val uploadUrl = uploadUrlInput.text.toString().trim()
-        val wsUrl = wsUrlInput.text.toString().trim()
+        val baseUrl = wsUrlInput.text.toString().trim()  // Updated: Use as base for polling
 
         if (resultData == null || resultCode == 0) {
             Toast.makeText(this, "Grant screen capture permission first", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // Start WS Client (connects on service start)
-        webSocketClient = WebSocketClient(
-            wsUrl = wsUrl,
+        // Start Poller (replaces WS)
+        audioPoller = AudioPoller(
+            baseUrl = baseUrl,
             onAudioUrl = { audioUrl ->
                 // Trigger ExoPlayer
                 ExoPlayerManager.play(this, audioUrl)
@@ -101,17 +101,17 @@ class MainActivity : AppCompatActivity() {
             },
             onStatusChange = { status ->
                 runOnUiThread {
-                    statusTv.text = "WS: $status"
+                    statusTv.text = "Poller: $status"
                 }
             }
         )
-        webSocketClient?.connect()
+        audioPoller?.startPolling()
 
         val svc = Intent(this, CaptureService::class.java).apply {
             action = CaptureService.ACTION_START
             putExtra(CaptureService.EXTRA_INTERVAL, interval)
             putExtra(CaptureService.EXTRA_UPLOAD_URL, uploadUrl)
-            putExtra(CaptureService.EXTRA_WS_URL, wsUrl)
+            // Removed WS_URL extra - not needed now
             putExtra(CaptureService.EXTRA_RESULT_CODE, resultCode)
             putExtra(CaptureService.EXTRA_RESULT_INTENT, resultData)
         }
@@ -119,19 +119,19 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc)
         else startService(svc)
 
-        statusTv.text = "▶️ Running every ${interval}s | WS: Connecting..."
+        statusTv.text = "▶️ Running every ${interval}s | Polling for audio..."
     }
 
     private fun stopCaptureService() {
         val stopIntent = Intent(this, CaptureService::class.java)
         stopIntent.action = CaptureService.ACTION_STOP
         startService(stopIntent)
-        webSocketClient?.close()
+        audioPoller?.stopPolling()
         statusTv.text = "🛑 Stopped"
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        webSocketClient?.close()
+        audioPoller?.stopPolling()
     }
 }
