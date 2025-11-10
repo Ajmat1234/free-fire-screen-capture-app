@@ -2,10 +2,8 @@ package com.ajmat.screencap
 
 import android.util.Log
 import com.google.gson.Gson
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.SupervisorJob  // NEW: Explicit for Kotlin 2.0
 import okhttp3.*
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -24,7 +22,7 @@ class AudioPoller(
         .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
         .build()
     private val gson = Gson()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)  // Now resolves
     private var lastTimestamp: String? = null  // Track last received
     private val isRunning = AtomicBoolean(false)
 
