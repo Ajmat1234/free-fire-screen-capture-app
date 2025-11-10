@@ -110,11 +110,9 @@ class CaptureService : Service() {
                     try {
                         val bmp = capturer?.captureOnce()
                         if (bmp != null) {
+                            // NEW: Async upload with bitmap recycle in upload func
                             scope.launch(Dispatchers.IO) {
-                                val uploadTime = measureTimeMillis {
-                                    uploadBitmap(uploadUrl, bmp)
-                                }
-                                Log.d(TAG, "Upload #$captureCount completed in ${uploadTime}ms")
+                                uploadBitmapWithRecycle(uploadUrl, bmp)
                             }
                             updateNotification("Captured #$captureCount ✅")
                             success = true
@@ -137,24 +135,43 @@ class CaptureService : Service() {
         }
     }
 
-    private suspend fun uploadBitmap(url: String, bitmap: Bitmap) {
-        if (url.isEmpty()) return
-        val stream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 70, stream)
-        val body = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart(
-                "file",
-                "screenshot_${System.currentTimeMillis()}.jpg",
-                stream.toByteArray().toRequestBody("image/jpeg".toMediaType())
-            ).build()
-        val req = Request.Builder().url(url).post(body).build()
-        val client = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) Log.e(TAG, "Upload failed: ${resp.code}")
-            else Log.d(TAG, "Upload successful for #$captureCount")
+    // NEW: Separate func for upload with recycle
+    private suspend fun uploadBitmapWithRecycle(url: String, bitmap: Bitmap) {
+        if (url.isEmpty()) {
+            bitmap.recycle()
+            return
+        }
+        try {
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 70, stream)
+            val byteArray = stream.toByteArray()
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart(
+                    "file",
+                    "screenshot_${System.currentTimeMillis()}.jpg",
+                    byteArray.toRequestBody("image/jpeg".toMediaType())
+                ).build()
+            val req = Request.Builder().url(url).post(body).build()
+            val client = OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)  // NEW: Add read timeout
+                .build()
+            val uploadTime = measureTimeMillis {
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) Log.e(TAG, "Upload failed: ${resp.code}")
+                    else Log.d(TAG, "Upload successful for #$captureCount")
+                }
+            }
+            Log.d(TAG, "Upload #$captureCount completed in ${uploadTime}ms")
+        } catch (e: Exception) {
+            Log.e(TAG, "Upload error #$captureCount", e)
+        } finally {
+            // NEW: Always recycle bitmap after use
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+                Log.d(TAG, "Bitmap recycled after upload #$captureCount")
+            }
         }
     }
 
@@ -191,6 +208,7 @@ class CaptureService : Service() {
         isCapturing = false
         scope.cancel()
         capturer?.stop()
+        Log.w(TAG, "Service destroyed—possible system kill. Check logs for OOM/battery issues.")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
