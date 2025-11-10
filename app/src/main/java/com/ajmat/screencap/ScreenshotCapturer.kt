@@ -152,6 +152,7 @@ class ScreenshotCapturer(
             return null
         }
         capturing = true
+        var finalBitmap: Bitmap? = null
         try {
             val reader = imageReader ?: run {
                 Log.w(TAG, "captureOnce: imageReader is null")
@@ -217,7 +218,7 @@ class ScreenshotCapturer(
             }
 
             // Added: Rotate bitmap based on current rotation for landscape support
-            var finalBitmap = bmp
+            finalBitmap = bmp
             if (currentRotation != Surface.ROTATION_0) {
                 val matrix = Matrix()
                 when (currentRotation) {
@@ -230,12 +231,17 @@ class ScreenshotCapturer(
                 Log.d(TAG, "Bitmap rotated for landscape (rotation: $currentRotation)")
             }
 
-            if (bmp.width != width || bmp.height != height) {
+            // FIXED: Use finalBitmap for cropping (ensure no leak)
+            if (finalBitmap.width != width || finalBitmap.height != height) {
                 try {
-                    Bitmap.createBitmap(bmp, 0, 0, width.coerceAtMost(bmp.width), height.coerceAtMost(bmp.height))
+                    finalBitmap = Bitmap.createBitmap(
+                        finalBitmap, 0, 0, 
+                        width.coerceAtMost(finalBitmap.width), 
+                        height.coerceAtMost(finalBitmap.height)
+                    )
+                    Log.d(TAG, "Bitmap cropped to $width x $height")
                 } catch (e: Exception) {
-                    Log.e(TAG, "cropping failed", e)
-                    bmp
+                    Log.e(TAG, "Cropping failed", e)
                 }
             }
 
@@ -244,12 +250,15 @@ class ScreenshotCapturer(
                     cb(finalBitmap)
                 } catch (e: Exception) {
                     Log.e(TAG, "onBitmapReady callback failed", e)
+                    finalBitmap?.recycle()  // Recycle if callback fails
+                    finalBitmap = null
                 }
             }
 
             return finalBitmap
         } catch (e: Exception) {
             Log.e(TAG, "captureOnce failed", e)
+            finalBitmap?.recycle()
             return null
         } finally {
             capturing = false
