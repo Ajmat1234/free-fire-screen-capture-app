@@ -48,7 +48,7 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.9.0'
 
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'  // FIXED: 1.7.3 -> 1.8.1 (Kotlin 2.0 compatible)
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'  // Updated to latest
     implementation 'com.google.code.gson:gson:2.10.1'
 
