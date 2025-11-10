@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MultipartBody
+import kotlin.system.measureTimeMillis
 
 class CaptureService : Service() {
 
@@ -36,6 +37,7 @@ class CaptureService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var capturer: ScreenshotCapturer? = null
     private var captureCount = 0
+    private var isCapturing = false  // NEW: Flag to prevent overlap
 
     override fun onCreate() {
         super.onCreate()
@@ -75,26 +77,59 @@ class CaptureService : Service() {
             return
         }
 
+        if (interval < 2) {
+            Log.w(TAG, "Interval <2s may cause high CPU/battery—consider increasing")
+        }
+
         startForeground(NOTIF_ID, createNotification("Capturing screen..."))
         capturer = ScreenshotCapturer(this, resultCode, data)
 
+        // NEW: Timed scheduler—start captures at exact intervals from now
+        val startTime = System.currentTimeMillis()
         scope.launch {
-            val safeInterval = interval.coerceIn(1, 10)
             while (isActive) {
-                captureCount++
-                try {
-                    val bmp = capturer?.captureOnce()
-                    if (bmp != null) {
-                        uploadBitmap(uploadUrl, bmp)
-                        updateNotification("Captured #$captureCount ✅")
-                    } else {
-                        updateNotification("Capture failed ❌ ($captureCount)")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Capture error", e)
-                    updateNotification("Error #$captureCount: ${e.message}")
+                val nextCaptureTime = startTime + (captureCount * interval * 1000L)
+                val now = System.currentTimeMillis()
+                val delayUntilNext = nextCaptureTime - now
+                if (delayUntilNext > 0) {
+                    Log.d(TAG, "Scheduling next capture in ${delayUntilNext}ms (target interval: ${interval}s)")
+                    delay(delayUntilNext)
+                } else {
+                    Log.w(TAG, "Missed schedule by ${-delayUntilNext}ms—capturing immediately")
                 }
-                delay(safeInterval * 1000L)
+
+                if (isCapturing) {
+                    Log.w(TAG, "Capture in progress—skipping this slot")
+                    captureCount++  // Still count to keep schedule
+                    continue
+                }
+
+                isCapturing = true
+                captureCount++
+                val captureTime = measureTimeMillis {  // NEW: Measure capture time
+                    try {
+                        val bmp = capturer?.captureOnce()
+                        if (bmp != null) {
+                            // NEW: Async upload—non-blocking
+                            scope.launch(Dispatchers.IO) {
+                                val uploadTime = measureTimeMillis {
+                                    uploadBitmap(uploadUrl, bmp)
+                                }
+                                Log.d(TAG, "Upload #$captureCount completed in ${uploadTime}ms")
+                            }
+                            updateNotification("Captured #$captureCount ✅")
+                            Log.d(TAG, "Capture #$captureCount successful in ${captureTime}ms")
+                        } else {
+                            updateNotification("Capture failed ❌ ($captureCount)")
+                            Log.w(TAG, "Capture #$captureCount failed (time: ${captureTime}ms)")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Capture error #$captureCount", e)
+                        updateNotification("Error #$captureCount: ${e.message}")
+                    }
+                }
+                Log.d(TAG, "Full cycle #$captureCount: ${captureTime}ms (excluding upload)")
+                isCapturing = false
             }
         }
     }
@@ -116,6 +151,7 @@ class CaptureService : Service() {
             .build()
         client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) Log.e(TAG, "Upload failed: ${resp.code}")
+            else Log.d(TAG, "Upload successful for #$captureCount")
         }
     }
 
@@ -149,6 +185,7 @@ class CaptureService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isCapturing = false
         scope.cancel()
         capturer?.stop()
     }
