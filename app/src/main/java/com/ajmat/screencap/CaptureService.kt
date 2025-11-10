@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MultipartBody
-import kotlin.system.measureTimeMillis  // FIXED: Added missing import for measureTimeMillis
+import kotlin.system.measureTimeMillis
 
 class CaptureService : Service() {
 
@@ -37,7 +37,7 @@ class CaptureService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var capturer: ScreenshotCapturer? = null
     private var captureCount = 0
-    private var isCapturing = false  // NEW: Flag to prevent overlap
+    private var isCapturing = false
 
     override fun onCreate() {
         super.onCreate()
@@ -84,7 +84,6 @@ class CaptureService : Service() {
         startForeground(NOTIF_ID, createNotification("Capturing screen..."))
         capturer = ScreenshotCapturer(this, resultCode, data)
 
-        // NEW: Timed scheduler—start captures at exact intervals from now
         val startTime = System.currentTimeMillis()
         scope.launch {
             while (isActive) {
@@ -100,17 +99,17 @@ class CaptureService : Service() {
 
                 if (isCapturing) {
                     Log.w(TAG, "Capture in progress—skipping this slot")
-                    captureCount++  // Still count to keep schedule
+                    captureCount++
                     continue
                 }
 
                 isCapturing = true
                 captureCount++
-                val captureTime = measureTimeMillis {  // NEW: Measure capture time
+                var success = false
+                val captureTime = measureTimeMillis {
                     try {
                         val bmp = capturer?.captureOnce()
                         if (bmp != null) {
-                            // NEW: Async upload—non-blocking
                             scope.launch(Dispatchers.IO) {
                                 val uploadTime = measureTimeMillis {
                                     uploadBitmap(uploadUrl, bmp)
@@ -118,15 +117,19 @@ class CaptureService : Service() {
                                 Log.d(TAG, "Upload #$captureCount completed in ${uploadTime}ms")
                             }
                             updateNotification("Captured #$captureCount ✅")
-                            Log.d(TAG, "Capture #$captureCount successful in ${captureTime}ms")
+                            success = true
                         } else {
                             updateNotification("Capture failed ❌ ($captureCount)")
-                            Log.w(TAG, "Capture #$captureCount failed (time: ${captureTime}ms)")
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Capture error #$captureCount", e)
                         updateNotification("Error #$captureCount: ${e.message}")
                     }
+                }
+                if (success) {
+                    Log.d(TAG, "Capture #$captureCount successful in ${captureTime}ms")
+                } else {
+                    Log.w(TAG, "Capture #$captureCount failed (time: ${captureTime}ms)")
                 }
                 Log.d(TAG, "Full cycle #$captureCount: ${captureTime}ms (excluding upload)")
                 isCapturing = false
