@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "com.ajmat.screencap"
-    compileSdk = 35  // Fixed: 34 -> 35
+    compileSdk = 35  // Good: Android 15
 
-    buildToolsVersion "35.0.0"  // Fixed: 34.0.0 -> 35.0.0
+    buildToolsVersion "35.0.0"  // Good
 
     defaultConfig {
         applicationId = "com.ajmat.screencap"
         minSdk = 23
-        targetSdk = 35  // Fixed: 34 -> 35
+        targetSdk = 35  // Good
         versionCode = 1
         versionName = "1.0"
     }
@@ -43,19 +43,19 @@ android {
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib:2.0.0"  // Fixed: 1.9.10 -> 2.0.0
-    implementation 'androidx.core:core-ktx:1.12.0'
-    implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'com.google.android.material:material:1.9.0'
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:2.0.21"  // Updated: 2.0.0 -> 2.0.21
+    implementation 'androidx.core:core-ktx:1.12.0'  // Good (latest 1.13.0 if want)
+    implementation 'androidx.appcompat:appcompat:1.6.1'  // Good (1.7.0 latest)
+    implementation 'com.google.android.material:material:1.9.0'  // Good (1.12.0 latest)
 
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'  // Updated to latest
-    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'  // Updated: 1.7.3 -> 1.8.1 (stable; 1.10.2 if aggressive)
+    implementation 'com.squareup.okhttp3:okhttp:5.0.0'  // Updated: 4.12.0 -> 5.0.0 (major; check code for deprecations like Response.body().close())
+    implementation 'com.google.code.gson:gson:2.10.1'  // Good (no major update; 2.11.0 if available)
 
-    // ✅ Modern ExoPlayer (Media3)
-    implementation 'androidx.media3:media3-exoplayer:1.4.1'
-    implementation 'androidx.media3:media3-ui:1.4.1'
+    // ✅ Modern ExoPlayer (Media3) - Updated
+    implementation 'androidx.media3:media3-exoplayer:1.8.0'  // Updated: 1.4.1 -> 1.8.0 (Aug 2025 release, new features like better scrubbing)
+    implementation 'androidx.media3:media3-ui:1.8.0'  // Match version
 
     // Optional: permission helper
-    implementation 'com.karumi:dexter:6.2.3'
+    implementation 'com.karumi:dexter:6.2.3'  // Good
 }
