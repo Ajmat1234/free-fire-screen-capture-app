@@ -5,15 +5,9 @@ buildscript {
         gradlePluginPortal()
     }
     dependencies {
-        classpath "com.android.tools.build:gradle:8.5.2"
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.0"  // Fixed: 1.9.25 -> 2.0.0
+        classpath "com.android.tools.build:gradle:8.13"  // Updated: 8.5.2 -> 8.13 (latest stable Nov 2025)
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21"  // Updated: 2.0.0 -> 2.0.21 (stable; or 2.2.0 if beta ok)
     }
 }
 
-// Removed: allprojects block - now managed by settings.gradle to avoid FAIL_ON_PROJECT_REPOS conflict
-// allprojects {
-//     repositories {
-//         google()
-//         mavenCentral()
-//     }
-// }
+// Removed: allprojects block - already good
